@@ -1,0 +1,164 @@
+<div class="roadmap-editor">
+  <div class="header">
+    <div class="header-left">
+      <div class="eyebrow">Product Roadmap · Q3</div>
+      <h1>ACD Product Roadmap <em>for Q3</em></h1>
+      <p class="subtitle">Drag tiles between cells to move them. Hover any cell to add a new block. Click any text to edit inline. Use the filter pills to show or hide streams.</p>
+    </div>
+    <div class="header-right">
+      <span class="save-status" [ngClass]="saveState">{{ saveLabel }}</span>
+      <button class="btn-export" type="button" (click)="exportHtml()">⬇ Export Embeddable HTML</button>
+      <button class="btn-export" type="button" [disabled]="pdfBusy" (click)="exportPdf()">{{ pdfBusy ? 'Generating…' : '⬇ Export PDF' }}</button>
+      <button class="btn-export" type="button" (click)="copyEmbed()">{{ copied ? '✓ Copied!' : '⧉ Copy Embed Code' }}</button>
+      <button class="btn-reset" type="button" (click)="resetToDefault()">Reset to default</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div
+      class="legend-pill"
+      *ngFor="let s of streams"
+      [class.inactive]="!isStreamActive(s.key)"
+      (click)="toggleStream(s.key)"
+    >
+      <span class="legend-dot" [ngClass]="s.key"></span>{{ s.name }}
+    </div>
+    <div class="legend-divider"></div>
+    <div class="legend-key"><span class="swatch dev"></span>Dev / Testing</div>
+    <div class="legend-key"><span class="swatch release"></span>Release</div>
+  </div>
+
+  <div class="roadmap">
+    <div class="corner-cell"></div>
+    <div
+      class="month-header"
+      *ngFor="let m of months"
+      [class.current]="m.current"
+    >
+      <div class="month">{{ m.month }}</div>
+      <div class="quarter">{{ m.quarter }}</div>
+    </div>
+
+    <ng-container *ngFor="let s of streams">
+      <div class="stream-row" *ngIf="isStreamActive(s.key)">
+        <div class="stream-label" [ngClass]="s.key">
+          <div class="stream-name">{{ s.name }}</div>
+          <div class="stream-meta">{{ s.meta }}</div>
+        </div>
+
+        <ng-container *ngFor="let lane of lanes">
+          <div class="lane-label" [ngClass]="lane.key">
+            <span class="lane-icon"></span>{{ lane.label }}
+          </div>
+          <div
+            class="roadmap-cell"
+            *ngFor="let m of months; let mi = index"
+            [class.current-month]="m.current"
+            [class.drag-over]="dragOverKey === cellKey(s.key, lane.key, mi)"
+            (dragover)="onDragOver($event, s.key, lane.key, mi)"
+            (dragleave)="onDragLeave(s.key, lane.key, mi)"
+            (drop)="onDrop($event, s.key, lane.key, mi)"
+          >
+            <div
+              class="tile"
+              *ngFor="let tile of tilesFor(s.key, lane.key, mi); trackBy: trackTile"
+              [ngClass]="[tile.lane, tile.color]"
+              [class.milestone]="tile.milestone"
+              draggable="true"
+              (dragstart)="onDragStart(tile)"
+              (dragend)="onDragEnd()"
+            >
+              <div class="tile-actions">
+                <button class="tile-edit" type="button" title="Edit block" (click)="openEdit(tile)">✎</button>
+                <button class="tile-delete" type="button" title="Delete block" (click)="deleteTile(tile)">×</button>
+              </div>
+
+              <div class="tile-label" *ngIf="tile.label">{{ tile.label }}</div>
+
+              <div class="tile-app-badges" *ngIf="tile.badges.length">
+                <span
+                  class="tile-app-badge"
+                  *ngFor="let b of tile.badges"
+                  [ngClass]="appDef(b).badgeClass"
+                >
+                  <span class="badge-dot"></span>{{ appDef(b).label }}
+                </span>
+              </div>
+
+              <div class="tile-items">
+                <div
+                  class="tile-item"
+                  *ngFor="let item of tile.items; let ii = index"
+                  contenteditable="true"
+                  (blur)="onItemEdit(tile, ii, $event)"
+                >{{ item }}</div>
+              </div>
+
+              <div class="tile-created-by" *ngIf="tile.createdBy?.length">
+                <span class="tile-created-by-label">By</span>
+                {{ tile.createdBy?.join(', ') }}
+              </div>
+            </div>
+
+            <button
+              class="add-block-btn"
+              type="button"
+              (click)="openAdd(s.key, lane.key, mi)"
+            >
+              + Add block
+            </button>
+          </div>
+        </ng-container>
+      </div>
+    </ng-container>
+  </div>
+</div>
+
+<!-- ADD MODAL -->
+<div class="modal-overlay" [class.open]="modalOpen" (click)="closeAdd()">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <h3>{{ modalTitle }}</h3>
+    <div class="modal-sub">One line per item</div>
+
+    <label>Items</label>
+    <textarea
+      [(ngModel)]="modalText"
+      placeholder="Enter each work item on its own line"
+    ></textarea>
+
+    <label>App badges (optional)</label>
+    <div class="app-chips">
+      <div
+        class="app-chip"
+        *ngFor="let app of apps"
+        [attr.data-app]="app.key"
+        [class.selected]="isBadgeSelected(app.key)"
+        (click)="toggleBadge(app.key)"
+      >
+        <span class="chip-dot" [style.background]="app.chipDotColor"></span>{{ app.label }}
+      </div>
+    </div>
+
+    <label>Created by</label>
+    <div class="created-by-list">
+      <label class="created-by-option" *ngFor="let person of people">
+        <input
+          type="checkbox"
+          [checked]="isPersonSelected(person)"
+          (change)="togglePerson(person)"
+        />
+        <span>{{ person }}</span>
+      </label>
+    </div>
+
+    <label class="milestone-row">
+      <input type="checkbox" [(ngModel)]="modalMilestone" />
+      <span>Mark as major milestone / GA (★)</span>
+    </label>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" type="button" (click)="closeAdd()">Cancel</button>
+      <button class="btn-add-submit" type="button" (click)="submitAdd()">{{ modalSubmitLabel }}</button>
+    </div>
+  </div>
+</div>
