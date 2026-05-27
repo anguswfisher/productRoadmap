@@ -24,6 +24,8 @@ export interface ExportData {
   apps: ExportApp[];
   tiles: ExportTile[];
   title?: string;
+  /** When false, omit the banner/header/footer chrome (just legend + grid). */
+  chrome?: boolean;
 }
 
 function esc(s: string): string {
@@ -181,6 +183,7 @@ function renderTile(t: ExportTile, apps: ExportApp[]): string {
 
 export function buildRoadmapHtml(data: ExportData): string {
   const { streams, months, lanes, apps, tiles } = data;
+  const chrome = data.chrome !== false;
   const label = data.title ?? 'Roadmap';
   const windowText = months.length
     ? `${months[0].month} – ${months[months.length - 1].month}`
@@ -240,15 +243,15 @@ export function buildRoadmapHtml(data: ExportData): string {
 <style>${ROADMAP_CSS}</style>
 </head>
 <body>
-<div class="banner">
+${chrome ? `<div class="banner">
   <div class="banner-left">
     <div class="brand">Product<span class="light">Roadmap</span></div>
     <div class="tagline">powered by the Product team</div>
   </div>
   <div class="banner-right"><span>"What we're building, and when."</span></div>
-</div>
-<div class="container">
-  <div class="header">
+</div>` : ''}
+<div class="container"${chrome ? '' : ' style="padding-top:28px;"'}>
+  ${chrome ? `<div class="header">
     <div class="header-left">
       <div class="eyebrow">Product Roadmap</div>
       <h1>ACD Product Roadmap <em>· ${esc(label)}</em></h1>
@@ -259,7 +262,7 @@ export function buildRoadmapHtml(data: ExportData): string {
       <div style="margin-top:4px;">Owner · Product</div>
       <div>Window · ${esc(windowText)}</div>
     </div>
-  </div>
+  </div>` : ''}
   <div class="legend">
     ${legendPills}
     <div class="legend-divider"></div>
@@ -271,7 +274,7 @@ export function buildRoadmapHtml(data: ExportData): string {
     ${monthHeaders}
     ${streamRows}
   </div>
-  <div class="footer">
+  ${chrome ? `<div class="footer">
     <div class="footer-block">
       <h4>How to read this</h4>
       <p>Each stream has two lanes: <strong>Dev / Testing</strong> (dashed border) shows work in progress, and <strong>Releases</strong> (solid fill) shows what's shipping.</p>
@@ -287,7 +290,7 @@ export function buildRoadmapHtml(data: ExportData): string {
       <strong style="color:var(--ubp-text);">Define the Meter:</strong> Usage Based Pricing and Staged Approach to UI Elements.<br>
       <strong style="color:var(--platform-text);">Platform &amp; Internal Tooling:</strong> Software tooling/packaging, Fusion Auth, SCV2, internal apps.</p>
     </div>
-  </div>
+  </div>` : ''}
 </div>
 </body></html>`;
 }

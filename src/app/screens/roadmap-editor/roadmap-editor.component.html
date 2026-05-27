@@ -1,48 +1,56 @@
 <div class="roadmap-editor">
-  <div class="header">
-    <div class="header-left">
-      <div class="eyebrow">Product Roadmap</div>
+  <div class="title-row">
+    <div class="eyebrow">Product Roadmap</div>
+    <h1 *ngIf="current">ACD Product Roadmap <em>· {{ currentLabel }}</em></h1>
+    <h1 *ngIf="!current">ACD Product Roadmap</h1>
+  </div>
 
-      <div class="roadmap-bar">
-        <select
-          class="roadmap-select"
-          [ngModel]="current?.id"
-          (ngModelChange)="selectRoadmapById($event)"
-          [disabled]="!roadmaps.length"
-        >
-          <option *ngIf="!roadmaps.length" [ngValue]="undefined">No roadmaps yet</option>
-          <option *ngFor="let r of roadmaps" [value]="r.id">
-            Q{{ r.quarter }} {{ r.year }}{{ r.published ? ' • Published' : ' • Draft' }}
-          </option>
-        </select>
-        <button class="btn-mini" type="button" (click)="openNewRoadmap()">+ New roadmap</button>
-        <button class="btn-mini" type="button" *ngIf="current" (click)="togglePublish()">
-          {{ current.published ? '● Published — Unpublish' : '○ Publish to public view' }}
-        </button>
-        <button class="btn-mini danger" type="button" *ngIf="current" (click)="deleteRoadmap()">Delete</button>
-      </div>
-
-      <h1 *ngIf="current">ACD Product Roadmap <em>· {{ currentLabel }}</em></h1>
-      <p class="subtitle">
-        Add initiatives on the left, then hover any cell to add a block. Drag blocks to move them, click text to edit. Publish when ready.
-      </p>
+  <div class="toolbar">
+    <div class="mode-toggle" *ngIf="roadmaps.length">
+      <button type="button" [class.active]="!timelineMode" (click)="setTimeline(false)">Edit</button>
+      <button type="button" [class.active]="timelineMode" (click)="setTimeline(true)">Full timeline</button>
     </div>
-    <div class="header-right">
-      <span class="save-status" [ngClass]="saveState">{{ saveLabel }}</span>
 
-      <button class="btn-view" type="button" *ngIf="roadmaps.length" [class.active-toggle]="timelineMode" (click)="toggleTimeline()">
-        {{ timelineMode ? '◱ Back to editing' : '⤢ See full timeline' }}
+    <ng-container *ngIf="!timelineMode">
+      <span class="picker-label">Roadmap</span>
+      <select
+        class="toolbar-select"
+        [ngModel]="current?.id"
+        (ngModelChange)="selectRoadmapById($event)"
+        [disabled]="!roadmaps.length"
+      >
+        <option *ngIf="!roadmaps.length" [ngValue]="undefined">No roadmaps yet</option>
+        <option *ngFor="let r of roadmaps" [value]="r.id">
+          Q{{ r.quarter }} {{ r.year }}{{ r.published ? ' • Published' : ' • Draft' }}
+        </option>
+      </select>
+
+      <span
+        class="status-chip"
+        *ngIf="current"
+        [class.published]="current.published"
+        [class.draft]="!current.published"
+      >
+        <span class="status-dot"></span>{{ current.published ? 'Published' : 'Draft' }}
+      </span>
+
+      <button class="toolbar-btn" type="button" (click)="openNewRoadmap()">+ New</button>
+      <button class="toolbar-btn" type="button" *ngIf="current" (click)="togglePublish()">
+        {{ current.published ? '● Published' : '○ Publish' }}
       </button>
+      <button class="toolbar-btn danger" type="button" *ngIf="current" (click)="deleteRoadmap()">Delete</button>
+    </ng-container>
 
-      <span class="header-divider"></span>
+    <span class="bar-spacer"></span>
 
-      <div class="export-group">
-        <span class="group-label">Export</span>
-        <button class="btn-export" type="button" [disabled]="!current && !timelineMode" (click)="exportHtml()">⬇ HTML</button>
-        <button class="btn-export" type="button" [disabled]="(!current && !timelineMode) || pdfBusy" (click)="exportPdf()">{{ pdfBusy ? 'Generating…' : '⬇ PDF' }}</button>
-        <button class="btn-export" type="button" [disabled]="(!current && !timelineMode) || slidesBusy" (click)="exportSlides()">{{ slidesBusy ? 'Generating…' : '⬇ Slides' }}</button>
-        <button class="btn-export" type="button" [disabled]="!current && !timelineMode" (click)="copyEmbed()">{{ copied ? '✓ Copied!' : '⧉ Copy embed' }}</button>
-      </div>
+    <span class="save-status" [ngClass]="saveState">{{ saveLabel }}</span>
+
+    <div class="export-group">
+      <span class="group-label">Export</span>
+      <button class="btn-export" type="button" [disabled]="!current && !timelineMode" (click)="exportHtml()">⬇ HTML</button>
+      <button class="btn-export" type="button" [disabled]="(!current && !timelineMode) || pdfBusy" (click)="exportPdf()">{{ pdfBusy ? 'Generating…' : '⬇ PDF' }}</button>
+      <button class="btn-export" type="button" [disabled]="(!current && !timelineMode) || slidesBusy" (click)="exportSlides()">{{ slidesBusy ? 'Generating…' : '⬇ Slides' }}</button>
+      <button class="btn-export" type="button" [disabled]="!current && !timelineMode" (click)="copyEmbed()">{{ copied ? '✓ Copied!' : '⧉ Copy embed' }}</button>
     </div>
   </div>
 

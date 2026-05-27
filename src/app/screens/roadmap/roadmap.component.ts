@@ -50,9 +50,9 @@ export class RoadmapComponent implements OnInit {
   pdfBusy = false;
   slidesBusy = false;
   copied = false;
+  displayTitle = '';
 
   private payload: RenderPayload | null = null;
-  private doc = '';
 
   constructor(
     private sanitizer: DomSanitizer,
@@ -109,8 +109,16 @@ export class RoadmapComponent implements OnInit {
 
   private render(payload: RenderPayload): void {
     this.payload = payload;
-    this.doc = buildRoadmapHtml(payload);
-    this.html = this.sanitizer.bypassSecurityTrustHtml(this.doc);
+    this.displayTitle = payload.title;
+    // On-screen: chromeless (no banner/header/footer) to match the editor look.
+    this.html = this.sanitizer.bypassSecurityTrustHtml(
+      buildRoadmapHtml({ ...payload, chrome: false }),
+    );
+  }
+
+  // Full self-contained doc for downloads / embedding.
+  private fullDoc(): string {
+    return this.payload ? buildRoadmapHtml({ ...this.payload, chrome: true }) : '';
   }
 
   private fileName(ext: string): string {
@@ -120,14 +128,16 @@ export class RoadmapComponent implements OnInit {
 
   // ── Export ──────────────────────────────────────────────────────
   exportHtml(): void {
-    if (this.doc) downloadRoadmapHtml(this.doc, this.fileName('html'));
+    const doc = this.fullDoc();
+    if (doc) downloadRoadmapHtml(doc, this.fileName('html'));
   }
 
   async exportPdf(): Promise<void> {
-    if (this.pdfBusy || !this.doc) return;
+    const doc = this.fullDoc();
+    if (this.pdfBusy || !doc) return;
     this.pdfBusy = true;
     try {
-      await exportRoadmapPdf(this.doc, this.fileName('pdf'));
+      await exportRoadmapPdf(doc, this.fileName('pdf'));
     } catch (err) {
       console.error('PDF export failed:', err);
     } finally {
@@ -149,7 +159,8 @@ export class RoadmapComponent implements OnInit {
   }
 
   async copyEmbed(): Promise<void> {
-    if (this.doc && (await copyRoadmapHtml(this.doc))) {
+    const doc = this.fullDoc();
+    if (doc && (await copyRoadmapHtml(doc))) {
       this.copied = true;
       setTimeout(() => (this.copied = false), 2000);
     }

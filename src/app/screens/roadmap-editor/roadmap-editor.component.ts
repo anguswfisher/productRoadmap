@@ -84,10 +84,11 @@ export class RoadmapEditorComponent {
     void this.init();
   }
 
-  toggleTimeline(): void {
-    this.timelineMode = !this.timelineMode;
-    this.timelineHtml = this.timelineMode
-      ? this.sanitizer.bypassSecurityTrustHtml(this.buildHtml())
+  setTimeline(on: boolean): void {
+    if (on === this.timelineMode) return;
+    this.timelineMode = on;
+    this.timelineHtml = on
+      ? this.sanitizer.bypassSecurityTrustHtml(this.buildHtml(false))
       : null;
   }
 
@@ -399,8 +400,8 @@ export class RoadmapEditorComponent {
     };
   }
 
-  private buildHtml(): string {
-    return buildRoadmapHtml(this.exportPayload());
+  private buildHtml(chrome = true): string {
+    return buildRoadmapHtml({ ...this.exportPayload(), chrome });
   }
 
   private exportFileName(ext: string): string {
