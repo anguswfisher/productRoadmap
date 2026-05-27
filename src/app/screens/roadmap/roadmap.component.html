@@ -1,5 +1,9 @@
+<div class="roadmap-status" *ngIf="loading">Loading roadmap…</div>
+<div class="roadmap-status" *ngIf="error">Sorry — the roadmap couldn't be loaded.</div>
+
 <iframe
   class="roadmap-frame"
-  [src]="roadmapSrc"
+  *ngIf="html"
+  [srcdoc]="html"
   title="Product Roadmap"
 ></iframe>

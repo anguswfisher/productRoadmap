@@ -3,60 +3,19 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { buildRoadmapHtml } from './roadmap-export';
 import { RoadmapStorageService, SaveState } from './roadmap-storage.service';
-
-type StreamKey =
-  | 'catina'
-  | 'ai-assistant'
-  | 'risk'
-  | 'enterprise'
-  | 'commerce'
-  | 'ubp'
-  | 'platform';
-
-type ColorKey = StreamKey | 'ubp-ecomm' | 'ubp-catina';
-
-type Lane = 'dev' | 'release';
-
-type AppKey =
-  | 'catina'
-  | 'ecomm'
-  | 'ai'
-  | 'risk'
-  | 'enterprise'
-  | 'platform'
-  | 'product';
-
-interface Tile {
-  id: string;
-  stream: StreamKey;
-  lane: Lane;
-  month: number;
-  color: ColorKey;
-  milestone: boolean;
-  badges: AppKey[];
-  label?: string;
-  items: string[];
-  createdBy?: string[];
-}
-
-interface StreamDef {
-  key: StreamKey;
-  name: string;
-  meta: string;
-}
-
-interface MonthDef {
-  month: string;
-  quarter: string;
-  current: boolean;
-}
-
-interface AppDef {
-  key: AppKey;
-  label: string;
-  badgeClass: string;
-  chipDotColor: string;
-}
+import {
+  StreamKey,
+  Lane,
+  AppKey,
+  Tile,
+  StreamDef,
+  MonthDef,
+  AppDef,
+  STREAMS,
+  MONTHS,
+  LANES,
+  APPS,
+} from './roadmap-model';
 
 const STORAGE_KEY = 'roadmap-editor-tiles-v1';
 
@@ -68,38 +27,10 @@ const STORAGE_KEY = 'roadmap-editor-tiles-v1';
   styleUrls: ['./roadmap-editor.component.scss'],
 })
 export class RoadmapEditorComponent {
-  readonly streams: StreamDef[] = [
-    { key: 'catina', name: 'Catina: New Editor', meta: 'Editor · Migration · Meter · Collaboration' },
-    { key: 'ai-assistant', name: 'AI Assistant', meta: 'In-product AI chat' },
-    { key: 'risk', name: 'AI Risk Review', meta: 'Document risk analysis' },
-    { key: 'enterprise', name: 'Enterprise APIs & Partnerships', meta: 'Integrations & partner platform' },
-    { key: 'commerce', name: 'Commerce & Buying Journey', meta: 'DOD+ · eComm · Pricing' },
-    { key: 'ubp', name: 'Define the Meter', meta: 'Usage Based Pricing · Staged UI Elements' },
-    { key: 'platform', name: 'Platform & Internal Tooling', meta: 'Infra · Auth · SC · Internal apps' },
-  ];
-
-  readonly months: MonthDef[] = [
-    { month: 'May', quarter: 'Q2 · 2026', current: true },
-    { month: 'June', quarter: 'Q2 · 2026', current: false },
-    { month: 'July', quarter: 'Q3 · 2026', current: false },
-    { month: 'August', quarter: 'Q3 · 2026', current: false },
-    { month: 'September', quarter: 'Q3 · 2026', current: false },
-  ];
-
-  readonly lanes: { key: Lane; label: string }[] = [
-    { key: 'dev', label: 'Dev / Testing' },
-    { key: 'release', label: 'Releases' },
-  ];
-
-  readonly apps: AppDef[] = [
-    { key: 'catina', label: 'Catina', badgeClass: 'badge-catina', chipDotColor: 'var(--catina)' },
-    { key: 'ecomm', label: 'eCommerce', badgeClass: 'badge-ecomm', chipDotColor: 'var(--commerce)' },
-    { key: 'ai', label: 'AI', badgeClass: 'badge-ai', chipDotColor: 'var(--ai-assistant)' },
-    { key: 'risk', label: 'Risk', badgeClass: 'badge-risk', chipDotColor: 'var(--risk)' },
-    { key: 'enterprise', label: 'Enterprise', badgeClass: 'badge-enterprise', chipDotColor: 'var(--enterprise)' },
-    { key: 'platform', label: 'Platform', badgeClass: 'badge-platform', chipDotColor: 'var(--platform)' },
-    { key: 'product', label: 'Product', badgeClass: 'badge-product', chipDotColor: '#d97706' },
-  ];
+  readonly streams: StreamDef[] = STREAMS;
+  readonly months: MonthDef[] = MONTHS;
+  readonly lanes: { key: Lane; label: string }[] = LANES;
+  readonly apps: AppDef[] = APPS;
 
   readonly people: string[] = [
     'Roger',

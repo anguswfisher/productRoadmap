@@ -17,8 +17,8 @@ export const routes: Routes = [
       ),
   },
   {
+    // Public, read-only — no guard. Shareable with stakeholders.
     path: 'roadmap',
-    canActivate: [authGuard],
     loadComponent: () =>
       import('./screens/roadmap/roadmap.component').then(
         (m) => m.RoadmapComponent,
