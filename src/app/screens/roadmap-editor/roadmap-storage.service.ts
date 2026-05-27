@@ -1,58 +1,126 @@
 import { Injectable } from '@angular/core';
 import { supabase, isSupabaseConfigured } from '../../auth/supabase-client';
-import { ROADMAP_ID } from './roadmap-supabase.config';
+import { Roadmap, StreamDef, Tile } from './roadmap-model';
 
-// ── Supabase table setup (run once in the SQL editor) ───────────────
+// ── Supabase table (run once in the SQL editor) ─────────────────────
 //
-//   create table roadmap (
-//     id          text primary key,
-//     tiles       jsonb not null default '[]'::jsonb,
-//     updated_at  timestamptz not null default now()
+//   create table roadmaps (
+//     id uuid primary key default gen_random_uuid(),
+//     quarter int not null check (quarter between 1 and 4),
+//     year int not null,
+//     initiatives jsonb not null default '[]'::jsonb,
+//     tiles jsonb not null default '[]'::jsonb,
+//     published boolean not null default false,
+//     created_at timestamptz not null default now(),
+//     updated_at timestamptz not null default now(),
+//     unique (quarter, year)
 //   );
-//
-//   alter table roadmap enable row level security;
-//
-//   -- Require a signed-in user (Supabase Auth) to read or write.
-//   create policy "roadmap auth read"  on roadmap for select to authenticated using (true);
-//   create policy "roadmap auth write" on roadmap for all    to authenticated using (true) with check (true);
-//
-// Row is created automatically on first save via upsert. Because this service
-// shares the same Supabase client as AuthService, the signed-in user's token is
-// attached to these requests automatically.
+//   alter table roadmaps enable row level security;
+//   create policy "roadmaps public read published" on roadmaps for select using (published = true);
+//   create policy "roadmaps auth read all" on roadmaps for select to authenticated using (true);
+//   create policy "roadmaps auth write" on roadmaps for all to authenticated using (true) with check (true);
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 const FLUSH_DELAY_MS = 800;
 
+interface RoadmapRow {
+  id: string;
+  quarter: number;
+  year: number;
+  initiatives: StreamDef[];
+  tiles: Tile[];
+  published: boolean;
+}
+
+function toRoadmap(row: RoadmapRow): Roadmap {
+  return {
+    id: row.id,
+    quarter: row.quarter,
+    year: row.year,
+    initiatives: row.initiatives ?? [],
+    tiles: row.tiles ?? [],
+    published: !!row.published,
+  };
+}
+
 @Injectable({ providedIn: 'root' })
 export class RoadmapStorageService {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private pending: unknown[] | null = null;
+  private pending: Roadmap | null = null;
 
-  /** True when a real Supabase project is configured. */
   get enabled(): boolean {
     return isSupabaseConfigured;
   }
 
-  /** Fetch the shared roadmap's tiles, or null if unavailable / not yet created. */
-  async load<T>(): Promise<T[] | null> {
-    if (!isSupabaseConfigured) return null;
+  /** All roadmaps (team view — includes drafts). Sorted newest first. */
+  async list(): Promise<Roadmap[]> {
+    if (!isSupabaseConfigured) return [];
     const { data, error } = await supabase
-      .from('roadmap')
-      .select('tiles')
-      .eq('id', ROADMAP_ID)
-      .maybeSingle();
+      .from('roadmaps')
+      .select('*')
+      .order('year', { ascending: false })
+      .order('quarter', { ascending: false });
     if (error) {
-      console.error('Roadmap load failed:', error.message);
-      return null;
+      console.error('Roadmaps load failed:', error.message);
+      return [];
     }
-    return (data?.tiles as T[]) ?? null;
+    return (data as RoadmapRow[]).map(toRoadmap);
   }
 
-  /** Debounced save of the whole tile set. Reports state via the callback. */
-  save(tiles: unknown[], onState?: (s: SaveState) => void): void {
+  /** Published roadmaps only (public view). */
+  async listPublished(): Promise<Roadmap[]> {
+    if (!isSupabaseConfigured) return [];
+    const { data, error } = await supabase
+      .from('roadmaps')
+      .select('*')
+      .eq('published', true)
+      .order('year', { ascending: false })
+      .order('quarter', { ascending: false });
+    if (error) {
+      console.error('Published roadmaps load failed:', error.message);
+      return [];
+    }
+    return (data as RoadmapRow[]).map(toRoadmap);
+  }
+
+  /** Creates a new (empty, unpublished) roadmap for a quarter/year. */
+  async create(quarter: number, year: number): Promise<Roadmap | null> {
+    if (!isSupabaseConfigured) return null;
+    const { data, error } = await supabase
+      .from('roadmaps')
+      .insert({ quarter, year, initiatives: [], tiles: [], published: false })
+      .select('*')
+      .single();
+    if (error) {
+      console.error('Create roadmap failed:', error.message);
+      return null;
+    }
+    return toRoadmap(data as RoadmapRow);
+  }
+
+  async remove(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured) return false;
+    const { error } = await supabase.from('roadmaps').delete().eq('id', id);
+    if (error) {
+      console.error('Delete roadmap failed:', error.message);
+      return false;
+    }
+    return true;
+  }
+
+  /** Immediate save (used for publish toggles, structural changes). */
+  async saveNow(roadmap: Roadmap, onState?: (s: SaveState) => void): Promise<void> {
     if (!isSupabaseConfigured) return;
-    this.pending = tiles;
+    onState?.('saving');
+    const { error } = await this.write(roadmap);
+    onState?.(error ? 'error' : 'saved');
+  }
+
+  /** Debounced save (used while editing tiles). */
+  save(roadmap: Roadmap, onState?: (s: SaveState) => void): void {
+    if (!isSupabaseConfigured) return;
+    this.pending = roadmap;
     onState?.('saving');
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => void this.flush(onState), FLUSH_DELAY_MS);
@@ -61,16 +129,21 @@ export class RoadmapStorageService {
   private async flush(onState?: (s: SaveState) => void): Promise<void> {
     this.flushTimer = null;
     if (this.pending === null) return;
-    const tiles = this.pending;
+    const roadmap = this.pending;
     this.pending = null;
-    const { error } = await supabase
-      .from('roadmap')
-      .upsert({ id: ROADMAP_ID, tiles, updated_at: new Date().toISOString() });
-    if (error) {
-      console.error('Roadmap save failed:', error.message);
-      onState?.('error');
-    } else {
-      onState?.('saved');
-    }
+    const { error } = await this.write(roadmap);
+    onState?.(error ? 'error' : 'saved');
+  }
+
+  private async write(roadmap: Roadmap) {
+    return supabase
+      .from('roadmaps')
+      .update({
+        initiatives: roadmap.initiatives,
+        tiles: roadmap.tiles,
+        published: roadmap.published,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', roadmap.id);
   }
 }

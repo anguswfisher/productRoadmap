@@ -1,7 +1,7 @@
 // Generates a self-contained, read-only HTML snapshot of the roadmap —
 // the same "Export Embeddable HTML" output as the original tool.
 
-interface ExportStream { key: string; name: string; meta: string; }
+interface ExportStream { key: string; name: string; meta: string; color: string; }
 interface ExportMonth { month: string; quarter: string; current: boolean; }
 interface ExportLane { key: string; label: string; }
 interface ExportApp { key: string; label: string; badgeClass: string; }
@@ -23,6 +23,7 @@ export interface ExportData {
   lanes: ExportLane[];
   apps: ExportApp[];
   tiles: ExportTile[];
+  title?: string;
 }
 
 function esc(s: string): string {
@@ -180,6 +181,10 @@ function renderTile(t: ExportTile, apps: ExportApp[]): string {
 
 export function buildRoadmapHtml(data: ExportData): string {
   const { streams, months, lanes, apps, tiles } = data;
+  const label = data.title ?? 'Roadmap';
+  const windowText = months.length
+    ? `${months[0].month} – ${months[months.length - 1].month}`
+    : '';
 
   const monthHeaders = months
     .map(
@@ -207,14 +212,14 @@ export function buildRoadmapHtml(data: ExportData): string {
           return laneLabel + cells;
         })
         .join('');
-      return `<div class="stream-row"><div class="stream-label ${s.key}"><div class="stream-name">${esc(s.name)}</div><div class="stream-meta">${esc(s.meta)}</div></div>${lanesHtml}</div>`;
+      return `<div class="stream-row"><div class="stream-label ${s.color}"><div class="stream-name">${esc(s.name)}</div><div class="stream-meta">${esc(s.meta)}</div></div>${lanesHtml}</div>`;
     })
     .join('');
 
   const legendPills = streams
     .map(
       (s) =>
-        `<div class="legend-pill"><span class="legend-dot ${s.key}"></span>${esc(s.name)}</div>`,
+        `<div class="legend-pill"><span class="legend-dot ${s.color}"></span>${esc(s.name)}</div>`,
     )
     .join('');
 
@@ -245,14 +250,14 @@ export function buildRoadmapHtml(data: ExportData): string {
 <div class="container">
   <div class="header">
     <div class="header-left">
-      <div class="eyebrow">Product Roadmap · Q3</div>
-      <h1>ACD Product Roadmap <em>for Q3</em></h1>
+      <div class="eyebrow">Product Roadmap</div>
+      <h1>ACD Product Roadmap <em>· ${esc(label)}</em></h1>
       <p class="subtitle">What we're building across value streams, and when it ships.</p>
     </div>
     <div class="header-right">
       <div class="live">Updated ${esc(updated)}</div>
       <div style="margin-top:4px;">Owner · Product</div>
-      <div>Window · May – Sep 2026</div>
+      <div>Window · ${esc(windowText)}</div>
     </div>
   </div>
   <div class="legend">
@@ -261,7 +266,7 @@ export function buildRoadmapHtml(data: ExportData): string {
     <div class="legend-key"><span class="swatch dev"></span>Dev / Testing</div>
     <div class="legend-key"><span class="swatch release"></span>Release</div>
   </div>
-  <div class="roadmap">
+  <div class="roadmap" style="grid-template-columns:200px 120px repeat(${months.length},minmax(0,1fr));">
     <div class="corner-cell"></div>
     ${monthHeaders}
     ${streamRows}

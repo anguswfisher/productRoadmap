@@ -1,5 +1,32 @@
 <div class="roadmap-status" *ngIf="loading">Loading roadmap…</div>
 <div class="roadmap-status" *ngIf="error">Sorry — the roadmap couldn't be loaded.</div>
+<div class="roadmap-status" *ngIf="!loading && !error && !published.length">
+  No published roadmaps yet.
+</div>
+
+<div class="picker-bar" *ngIf="published.length">
+  <div class="mode-toggle">
+    <button [class.active]="mode === 'quarter'" (click)="setMode('quarter')">By quarter</button>
+    <button [class.active]="mode === 'timeline'" (click)="setMode('timeline')">Full timeline</button>
+  </div>
+
+  <ng-container *ngIf="mode === 'quarter'">
+    <span class="picker-label">Quarter</span>
+    <select [ngModel]="selectedId" (ngModelChange)="select($event)">
+      <option *ngFor="let r of published" [value]="r.id">{{ label(r) }}</option>
+    </select>
+  </ng-container>
+
+  <span class="bar-spacer"></span>
+
+  <div class="export-group">
+    <span class="group-label">Export</span>
+    <button class="btn-export" type="button" (click)="exportHtml()">⬇ HTML</button>
+    <button class="btn-export" type="button" [disabled]="pdfBusy" (click)="exportPdf()">{{ pdfBusy ? 'Generating…' : '⬇ PDF' }}</button>
+    <button class="btn-export" type="button" [disabled]="slidesBusy" (click)="exportSlides()">{{ slidesBusy ? 'Generating…' : '⬇ Slides' }}</button>
+    <button class="btn-export" type="button" (click)="copyEmbed()">{{ copied ? '✓ Copied!' : '⧉ Copy embed' }}</button>
+  </div>
+</div>
 
 <iframe
   class="roadmap-frame"

@@ -1,24 +1,58 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { buildRoadmapHtml } from '../roadmap-editor/roadmap-export';
+import {
+  downloadRoadmapHtml,
+  copyRoadmapHtml,
+  exportRoadmapPdf,
+} from '../roadmap-editor/roadmap-export-actions';
 import { RoadmapStorageService } from '../roadmap-editor/roadmap-storage.service';
-import { STREAMS, MONTHS, LANES, APPS, Tile } from '../roadmap-editor/roadmap-model';
+import {
+  Roadmap,
+  StreamDef,
+  MonthDef,
+  Tile,
+  LANES,
+  APPS,
+  quarterMonths,
+  quarterLabel,
+  combineRoadmaps,
+} from '../roadmap-editor/roadmap-model';
 
-// Public, read-only view of the live roadmap. No login required, no editing —
-// it renders the same self-contained read-only HTML as the export, built from
-// the current tiles in Supabase.
+interface RenderPayload {
+  streams: StreamDef[];
+  months: MonthDef[];
+  lanes: typeof LANES;
+  apps: typeof APPS;
+  tiles: Tile[];
+  title: string;
+}
+
+// Public, read-only view. No login. Shows published roadmaps: single quarter
+// (picker) or full stitched timeline, with the same export options as the editor.
 @Component({
   selector: 'app-roadmap',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './roadmap.component.html',
   styleUrls: ['./roadmap.component.scss'],
 })
 export class RoadmapComponent implements OnInit {
+  published: Roadmap[] = [];
+  selectedId: string | null = null;
+  mode: 'quarter' | 'timeline' = 'quarter';
   html: SafeHtml | null = null;
   loading = true;
   error = false;
+
+  pdfBusy = false;
+  slidesBusy = false;
+  copied = false;
+
+  private payload: RenderPayload | null = null;
+  private doc = '';
 
   constructor(
     private sanitizer: DomSanitizer,
@@ -27,19 +61,97 @@ export class RoadmapComponent implements OnInit {
 
   async ngOnInit(): Promise<void> {
     try {
-      const tiles = (await this.storage.load<Tile>()) ?? [];
-      const doc = buildRoadmapHtml({
-        streams: STREAMS,
-        months: MONTHS,
-        lanes: LANES,
-        apps: APPS,
-        tiles,
-      });
-      this.html = this.sanitizer.bypassSecurityTrustHtml(doc);
+      this.published = await this.storage.listPublished();
+      if (this.published.length) this.select(this.published[0].id);
     } catch {
       this.error = true;
     } finally {
       this.loading = false;
+    }
+  }
+
+  label(r: Roadmap): string {
+    return quarterLabel(r.quarter, r.year);
+  }
+
+  setMode(mode: 'quarter' | 'timeline'): void {
+    this.mode = mode;
+    if (mode === 'timeline') this.renderTimeline();
+    else if (this.selectedId) this.select(this.selectedId);
+    else if (this.published.length) this.select(this.published[0].id);
+  }
+
+  select(id: string): void {
+    const r = this.published.find((x) => x.id === id);
+    if (!r) return;
+    this.selectedId = id;
+    this.render({
+      streams: r.initiatives,
+      months: quarterMonths(r.quarter, r.year),
+      lanes: LANES,
+      apps: APPS,
+      tiles: r.tiles,
+      title: quarterLabel(r.quarter, r.year),
+    });
+  }
+
+  private renderTimeline(): void {
+    const c = combineRoadmaps(this.published);
+    this.render({
+      streams: c.streams,
+      months: c.months,
+      lanes: LANES,
+      apps: APPS,
+      tiles: c.tiles,
+      title: c.title,
+    });
+  }
+
+  private render(payload: RenderPayload): void {
+    this.payload = payload;
+    this.doc = buildRoadmapHtml(payload);
+    this.html = this.sanitizer.bypassSecurityTrustHtml(this.doc);
+  }
+
+  private fileName(ext: string): string {
+    const base = this.payload?.title ?? 'roadmap';
+    return `roadmap-${base.replace(/\s+/g, '-')}.${ext}`;
+  }
+
+  // ── Export ──────────────────────────────────────────────────────
+  exportHtml(): void {
+    if (this.doc) downloadRoadmapHtml(this.doc, this.fileName('html'));
+  }
+
+  async exportPdf(): Promise<void> {
+    if (this.pdfBusy || !this.doc) return;
+    this.pdfBusy = true;
+    try {
+      await exportRoadmapPdf(this.doc, this.fileName('pdf'));
+    } catch (err) {
+      console.error('PDF export failed:', err);
+    } finally {
+      this.pdfBusy = false;
+    }
+  }
+
+  async exportSlides(): Promise<void> {
+    if (this.slidesBusy || !this.payload) return;
+    this.slidesBusy = true;
+    try {
+      const { exportRoadmapSlides } = await import('../roadmap-editor/roadmap-slides');
+      await exportRoadmapSlides(this.payload);
+    } catch (err) {
+      console.error('Slides export failed:', err);
+    } finally {
+      this.slidesBusy = false;
+    }
+  }
+
+  async copyEmbed(): Promise<void> {
+    if (this.doc && (await copyRoadmapHtml(this.doc))) {
+      this.copied = true;
+      setTimeout(() => (this.copied = false), 2000);
     }
   }
 }

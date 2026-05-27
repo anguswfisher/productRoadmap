@@ -1,7 +1,13 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { buildRoadmapHtml } from './roadmap-export';
+import {
+  downloadRoadmapHtml,
+  copyRoadmapHtml,
+  exportRoadmapPdf,
+} from './roadmap-export-actions';
 import { RoadmapStorageService, SaveState } from './roadmap-storage.service';
 import {
   StreamKey,
@@ -11,13 +17,15 @@ import {
   StreamDef,
   MonthDef,
   AppDef,
-  STREAMS,
-  MONTHS,
+  Roadmap,
   LANES,
   APPS,
+  quarterMonths,
+  quarterLabel,
+  nextColor,
+  genId,
+  combineRoadmaps,
 } from './roadmap-model';
-
-const STORAGE_KEY = 'roadmap-editor-tiles-v1';
 
 @Component({
   selector: 'app-roadmap-editor',
@@ -27,29 +35,33 @@ const STORAGE_KEY = 'roadmap-editor-tiles-v1';
   styleUrls: ['./roadmap-editor.component.scss'],
 })
 export class RoadmapEditorComponent {
-  readonly streams: StreamDef[] = STREAMS;
-  readonly months: MonthDef[] = MONTHS;
   readonly lanes: { key: Lane; label: string }[] = LANES;
   readonly apps: AppDef[] = APPS;
 
   readonly people: string[] = [
-    'Roger',
-    'Bruce',
-    'Devin',
-    'Angus',
-    'Kiki',
-    'Xy',
-    'Other Stakeholders',
+    'Roger', 'Bruce', 'Devin', 'Angus', 'Kiki', 'Xy', 'Other Stakeholders',
   ];
 
-  tiles: Tile[] = [];
+  // ── Multi-roadmap state ─────────────────────────────────────────
+  roadmaps: Roadmap[] = [];
+  current: Roadmap | null = null;
+  months: MonthDef[] = [];
+  loading = true;
   hiddenStreams = new Set<StreamKey>();
+
+  // New-roadmap modal
+  newRoadmapOpen = false;
+  newQuarter = Math.floor(new Date().getMonth() / 3) + 1;
+  newYear = new Date().getFullYear();
+
+  // Add-initiative
+  newInitiativeName = '';
 
   // Drag state
   private draggingId: string | null = null;
   dragOverKey: string | null = null;
 
-  // Modal state
+  // Add/edit block modal
   modalOpen = false;
   editingTileId: string | null = null;
   private modalCell: { stream: StreamKey; lane: Lane; month: number } | null = null;
@@ -58,13 +70,38 @@ export class RoadmapEditorComponent {
   modalBadges = new Set<AppKey>();
   modalCreatedBy = new Set<string>();
 
-  private idCounter = 0;
-
+  copied = false;
   saveState: SaveState = 'idle';
 
-  constructor(private storage: RoadmapStorageService) {
-    this.loadLocal();
-    void this.initRemote();
+  // Full-timeline (read-only) mode: stitches every roadmap into one wide grid.
+  timelineMode = false;
+  timelineHtml: SafeHtml | null = null;
+
+  constructor(
+    private storage: RoadmapStorageService,
+    private sanitizer: DomSanitizer,
+  ) {
+    void this.init();
+  }
+
+  toggleTimeline(): void {
+    this.timelineMode = !this.timelineMode;
+    this.timelineHtml = this.timelineMode
+      ? this.sanitizer.bypassSecurityTrustHtml(this.buildHtml())
+      : null;
+  }
+
+  // ── Convenience accessors ───────────────────────────────────────
+  get streams(): StreamDef[] {
+    return this.current?.initiatives ?? [];
+  }
+
+  get tiles(): Tile[] {
+    return this.current?.tiles ?? [];
+  }
+
+  get currentLabel(): string {
+    return this.current ? quarterLabel(this.current.quarter, this.current.year) : '';
   }
 
   get saveLabel(): string {
@@ -75,6 +112,102 @@ export class RoadmapEditorComponent {
       case 'error': return 'Save failed';
       default: return 'Synced';
     }
+  }
+
+  // ── Load ────────────────────────────────────────────────────────
+  private async init(): Promise<void> {
+    this.loading = true;
+    this.roadmaps = await this.storage.list();
+    if (this.roadmaps.length) this.selectRoadmap(this.roadmaps[0]);
+    this.loading = false;
+  }
+
+  selectRoadmap(r: Roadmap): void {
+    this.current = r;
+    this.months = quarterMonths(r.quarter, r.year);
+    this.hiddenStreams.clear();
+    this.saveState = 'saved';
+  }
+
+  selectRoadmapById(id: string): void {
+    const r = this.roadmaps.find((x) => x.id === id);
+    if (r) this.selectRoadmap(r);
+  }
+
+  // ── New roadmap ─────────────────────────────────────────────────
+  openNewRoadmap(): void {
+    this.newRoadmapOpen = true;
+  }
+  closeNewRoadmap(): void {
+    this.newRoadmapOpen = false;
+  }
+
+  async createRoadmap(): Promise<void> {
+    const quarter = Number(this.newQuarter);
+    const year = Number(this.newYear);
+    if (!quarter || !year) return;
+    if (this.roadmaps.some((r) => r.quarter === quarter && r.year === year)) {
+      const existing = this.roadmaps.find(
+        (r) => r.quarter === quarter && r.year === year,
+      )!;
+      this.selectRoadmap(existing);
+      this.closeNewRoadmap();
+      return;
+    }
+    const created = await this.storage.create(quarter, year);
+    if (created) {
+      this.roadmaps = [created, ...this.roadmaps];
+      this.selectRoadmap(created);
+    }
+    this.closeNewRoadmap();
+  }
+
+  async deleteRoadmap(): Promise<void> {
+    if (!this.current) return;
+    const label = this.currentLabel;
+    if (!confirm(`Delete the ${label} roadmap? This cannot be undone.`)) return;
+    const id = this.current.id;
+    const ok = await this.storage.remove(id);
+    if (ok) {
+      this.roadmaps = this.roadmaps.filter((r) => r.id !== id);
+      this.current = null;
+      if (this.roadmaps.length) this.selectRoadmap(this.roadmaps[0]);
+    }
+  }
+
+  // ── Publish ─────────────────────────────────────────────────────
+  async togglePublish(): Promise<void> {
+    if (!this.current) return;
+    this.current.published = !this.current.published;
+    await this.storage.saveNow(this.current, (s) => (this.saveState = s));
+  }
+
+  // ── Initiatives (left-hand rows) ────────────────────────────────
+  addInitiative(): void {
+    if (!this.current) return;
+    const name = this.newInitiativeName.trim();
+    if (!name) return;
+    const color = nextColor(this.current.initiatives);
+    this.current.initiatives.push({ key: genId('init'), name, meta: '', color });
+    this.newInitiativeName = '';
+    this.persist();
+  }
+
+  removeInitiative(stream: StreamKey, event: Event): void {
+    event.stopPropagation();
+    if (!this.current) return;
+    const init = this.current.initiatives.find((s) => s.key === stream);
+    const name = init?.name ?? 'this initiative';
+    const tileCount = this.current.tiles.filter((t) => t.stream === stream).length;
+    if (
+      !confirm(
+        `Remove "${name}"${tileCount ? ` and its ${tileCount} block(s)` : ''}?`,
+      )
+    )
+      return;
+    this.current.initiatives = this.current.initiatives.filter((s) => s.key !== stream);
+    this.current.tiles = this.current.tiles.filter((t) => t.stream !== stream);
+    this.persist();
   }
 
   // ── Lookups ─────────────────────────────────────────────────────
@@ -89,6 +222,7 @@ export class RoadmapEditorComponent {
   }
 
   trackTile = (_: number, t: Tile) => t.id;
+  trackStream = (_: number, s: StreamDef) => s.key;
 
   // ── Stream filter pills ─────────────────────────────────────────
   toggleStream(stream: StreamKey): void {
@@ -129,40 +263,43 @@ export class RoadmapEditorComponent {
   onDrop(event: DragEvent, stream: StreamKey, lane: Lane, month: number): void {
     event.preventDefault();
     this.dragOverKey = null;
-    if (!this.draggingId) return;
-    const tile = this.tiles.find((t) => t.id === this.draggingId);
+    if (!this.draggingId || !this.current) return;
+    const tile = this.current.tiles.find((t) => t.id === this.draggingId);
     if (!tile) return;
     tile.stream = stream;
     tile.lane = lane;
     tile.month = month;
+    const init = this.streams.find((s) => s.key === stream);
+    if (init) tile.color = init.color;
     this.draggingId = null;
     this.persist();
   }
 
-  // ── Delete & edit ───────────────────────────────────────────────
+  // ── Delete & inline edit ────────────────────────────────────────
   deleteTile(tile: Tile): void {
-    this.tiles = this.tiles.filter((t) => t.id !== tile.id);
+    if (!this.current) return;
+    this.current.tiles = this.current.tiles.filter((t) => t.id !== tile.id);
     this.persist();
   }
 
   onItemEdit(tile: Tile, index: number, event: Event): void {
+    if (!this.current) return;
     const text = (event.target as HTMLElement).textContent?.trim() ?? '';
     if (text) {
       tile.items[index] = text;
     } else {
       tile.items.splice(index, 1);
       if (tile.items.length === 0) {
-        this.tiles = this.tiles.filter((t) => t.id !== tile.id);
+        this.current.tiles = this.current.tiles.filter((t) => t.id !== tile.id);
       }
     }
     this.persist();
   }
 
-  // ── Add-block modal ─────────────────────────────────────────────
+  // ── Add/edit block modal ────────────────────────────────────────
   get modalTitle(): string {
     return this.editingTileId ? 'Edit block' : 'Add block';
   }
-
   get modalSubmitLabel(): string {
     return this.editingTileId ? 'Save changes' : 'Add block';
   }
@@ -197,30 +334,24 @@ export class RoadmapEditorComponent {
     if (this.modalBadges.has(app)) this.modalBadges.delete(app);
     else this.modalBadges.add(app);
   }
-
   isBadgeSelected(app: AppKey): boolean {
     return this.modalBadges.has(app);
   }
-
   togglePerson(name: string): void {
     if (this.modalCreatedBy.has(name)) this.modalCreatedBy.delete(name);
     else this.modalCreatedBy.add(name);
   }
-
   isPersonSelected(name: string): boolean {
     return this.modalCreatedBy.has(name);
   }
 
   submitAdd(): void {
-    if (!this.modalCell) return;
-    const items = this.modalText
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    if (!this.modalCell || !this.current) return;
+    const items = this.modalText.split('\n').map((s) => s.trim()).filter(Boolean);
     if (items.length === 0) return;
 
     if (this.editingTileId) {
-      const tile = this.tiles.find((t) => t.id === this.editingTileId);
+      const tile = this.current.tiles.find((t) => t.id === this.editingTileId);
       if (tile) {
         tile.items = items;
         tile.milestone = this.modalMilestone;
@@ -228,44 +359,57 @@ export class RoadmapEditorComponent {
         tile.createdBy = Array.from(this.modalCreatedBy);
       }
     } else {
-      this.tiles.push({
-        id: this.nextId(),
+      const init = this.streams.find((s) => s.key === this.modalCell!.stream);
+      this.current.tiles.push({
+        id: genId('t'),
         stream: this.modalCell.stream,
         lane: this.modalCell.lane,
         month: this.modalCell.month,
-        color: this.modalCell.stream,
+        color: init?.color ?? 'platform',
         milestone: this.modalMilestone,
         badges: Array.from(this.modalBadges),
         items,
         createdBy: Array.from(this.modalCreatedBy),
       });
     }
-
     this.persist();
     this.closeAdd();
   }
 
   // ── Export ──────────────────────────────────────────────────────
-  copied = false;
-
-  private buildHtml(): string {
-    return buildRoadmapHtml({
+  private exportPayload() {
+    if (this.timelineMode) {
+      const c = combineRoadmaps(this.roadmaps);
+      return {
+        streams: c.streams,
+        months: c.months,
+        lanes: this.lanes,
+        apps: this.apps,
+        tiles: c.tiles,
+        title: c.title,
+      };
+    }
+    return {
       streams: this.streams,
       months: this.months,
       lanes: this.lanes,
       apps: this.apps,
       tiles: this.tiles,
-    });
+      title: this.currentLabel,
+    };
+  }
+
+  private buildHtml(): string {
+    return buildRoadmapHtml(this.exportPayload());
+  }
+
+  private exportFileName(ext: string): string {
+    const base = this.timelineMode ? 'full-timeline' : this.currentLabel;
+    return `roadmap-${base.replace(/\s+/g, '-')}.${ext}`;
   }
 
   exportHtml(): void {
-    const blob = new Blob([this.buildHtml()], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'roadmap-export.html';
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadRoadmapHtml(this.buildHtml(), this.exportFileName('html'));
   }
 
   pdfBusy = false;
@@ -273,65 +417,11 @@ export class RoadmapEditorComponent {
   async exportPdf(): Promise<void> {
     if (this.pdfBusy) return;
     this.pdfBusy = true;
-
-    // Render the clean (button-free) export HTML off-screen at full width.
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText =
-      'position:fixed;left:-10000px;top:0;width:1720px;height:10px;border:0;';
-    document.body.appendChild(iframe);
-
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import('html2canvas'),
-        import('jspdf'),
-      ]);
-
-      const doc = iframe.contentDocument;
-      if (!doc) throw new Error('Could not access export frame');
-      doc.open();
-      doc.write(this.buildHtml());
-      doc.close();
-
-      // Wait for layout + web fonts so the snapshot matches the on-screen design.
-      try {
-        await (doc as Document & { fonts?: FontFaceSet }).fonts?.ready;
-      } catch {
-        /* fonts API unavailable — continue */
-      }
-      await new Promise((r) => setTimeout(r, 350));
-
-      const target = doc.body;
-      const width = target.scrollWidth;
-      const height = target.scrollHeight;
-
-      const canvas = await html2canvas(target, {
-        width,
-        height,
-        windowWidth: width,
-        windowHeight: height,
-        scale: 2,
-        backgroundColor: '#f7f6f3',
-        useCORS: true,
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const orientation = canvas.width >= canvas.height ? 'landscape' : 'portrait';
-      const pdf = new jsPDF({ orientation, unit: 'pt', format: 'a4' });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const ratio = Math.min(
-        (pageW - margin * 2) / canvas.width,
-        (pageH - margin * 2) / canvas.height,
-      );
-      const w = canvas.width * ratio;
-      const h = canvas.height * ratio;
-      pdf.addImage(imgData, 'PNG', (pageW - w) / 2, (pageH - h) / 2, w, h);
-      pdf.save('roadmap.pdf');
+      await exportRoadmapPdf(this.buildHtml(), this.exportFileName('pdf'));
     } catch (err) {
       console.error('PDF export failed:', err);
     } finally {
-      document.body.removeChild(iframe);
       this.pdfBusy = false;
     }
   }
@@ -343,13 +433,7 @@ export class RoadmapEditorComponent {
     this.slidesBusy = true;
     try {
       const { exportRoadmapSlides } = await import('./roadmap-slides');
-      await exportRoadmapSlides({
-        streams: this.streams,
-        months: this.months,
-        lanes: this.lanes,
-        apps: this.apps,
-        tiles: this.tiles,
-      });
+      await exportRoadmapSlides(this.exportPayload());
     } catch (err) {
       console.error('Slides export failed:', err);
     } finally {
@@ -358,134 +442,15 @@ export class RoadmapEditorComponent {
   }
 
   async copyEmbed(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(this.buildHtml());
+    if (await copyRoadmapHtml(this.buildHtml())) {
       this.copied = true;
       setTimeout(() => (this.copied = false), 2000);
-    } catch {
-      /* clipboard unavailable */
     }
   }
 
   // ── Persistence ─────────────────────────────────────────────────
-  resetToDefault(): void {
-    this.tiles = this.seed();
-    this.persist();
-  }
-
   private persist(): void {
-    this.cacheLocal();
-    this.storage.save(this.tiles, (s) => (this.saveState = s));
-  }
-
-  private cacheLocal(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.tiles));
-    } catch {
-      /* storage unavailable — keep in-memory state */
-    }
-  }
-
-  // Instant paint from the local cache (or seed) before the server responds.
-  private loadLocal(): void {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        this.tiles = JSON.parse(raw) as Tile[];
-        this.idCounter = this.tiles.length;
-        return;
-      }
-    } catch {
-      /* fall through to seed */
-    }
-    this.tiles = this.seed();
-  }
-
-  // Reconcile with the shared server copy; seed the row on first ever run.
-  private async initRemote(): Promise<void> {
-    if (!this.storage.enabled) return;
-    const remote = await this.storage.load<Tile>();
-    if (remote && remote.length) {
-      this.tiles = remote;
-      this.idCounter = this.tiles.length;
-      this.cacheLocal();
-      this.saveState = 'saved';
-    } else {
-      // No server copy yet — push the current tiles up as the initial state.
-      this.persist();
-    }
-  }
-
-  private nextId(): string {
-    return `t${Date.now()}-${this.idCounter++}`;
-  }
-
-  private seed(): Tile[] {
-    this.idCounter = 0;
-    const t: Omit<Tile, 'id'>[] = [
-      // ── Catina ──
-      { stream: 'catina', lane: 'dev', month: 0, color: 'catina', milestone: false, badges: [], items: ['FF cleanup / Amplitude / Collaboration — Discovery', 'DOD+ scoping'] },
-      { stream: 'catina', lane: 'dev', month: 1, color: 'catina', milestone: false, badges: [], items: ['New Editor Improvements, stabilization', 'View other editors; simplify variable entry; monitor load time', 'Collaboration — development'] },
-      { stream: 'catina', lane: 'dev', month: 2, color: 'catina', milestone: false, badges: [], items: ['Transition Forms to V2 Catina', 'Add Attachments to Agreements in New Editor workflow', 'Move pay app calculations to the front end', 'Collaboration — testing'] },
-      { stream: 'catina', lane: 'dev', month: 3, color: 'catina', milestone: false, badges: [], items: ['Add Revision History / Versions for documents'] },
-      { stream: 'catina', lane: 'dev', month: 4, color: 'catina', milestone: false, badges: [], items: ['Low-cost E-Signature replacement w/ per-signer tracking display'] },
-      { stream: 'catina', lane: 'release', month: 0, color: 'catina', milestone: true, badges: [], items: ['GA Release of New Editor', 'Catina migration starts'] },
-      { stream: 'catina', lane: 'release', month: 1, color: 'catina', milestone: false, badges: [], items: ['Catina migration completes'] },
-      { stream: 'catina', lane: 'release', month: 2, color: 'catina', milestone: false, badges: [], items: ['DoD+ Migration to Catina', 'Attachments Appended to Documents'] },
-      { stream: 'catina', lane: 'release', month: 3, color: 'catina', milestone: false, badges: [], items: ['Version History', 'Collaboration — first release'] },
-      { stream: 'catina', lane: 'release', month: 4, color: 'catina', milestone: false, badges: [], items: ['Collaboration — post-MVP enhancements'] },
-
-      // ── AI Assistant ──
-      { stream: 'ai-assistant', lane: 'dev', month: 0, color: 'ai-assistant', milestone: false, badges: [], items: ['Product POC — AI Chat v2'] },
-      { stream: 'ai-assistant', lane: 'release', month: 0, color: 'ai-assistant', milestone: false, badges: [], items: ['AI Assistant MVP — Opt-In'] },
-      { stream: 'ai-assistant', lane: 'release', month: 2, color: 'ai-assistant', milestone: true, badges: [], items: ['GA Release of AI Assistant'] },
-
-      // ── AI Risk Review ──
-      { stream: 'risk', lane: 'dev', month: 0, color: 'risk', milestone: false, badges: [], items: ['Product POC for Risk Review', 'Team getting set up / Enterprise API'] },
-      { stream: 'risk', lane: 'dev', month: 1, color: 'risk', milestone: false, badges: [], items: ['Complete MVP Risk Review', 'Risk Review app'] },
-      { stream: 'risk', lane: 'dev', month: 2, color: 'risk', milestone: false, badges: [], items: ['Risk Review Support / Refinements', 'Risk Review App'] },
-      { stream: 'risk', lane: 'release', month: 3, color: 'risk', milestone: true, badges: [], items: ['Risk Review App Release'] },
-
-      // ── Enterprise ──
-      { stream: 'enterprise', lane: 'dev', month: 0, color: 'enterprise', milestone: false, badges: [], items: ['Enterprise API Solutioning', 'FusionAuth POC for partners', 'Procore Integration / Pipelines'] },
-      { stream: 'enterprise', lane: 'dev', month: 1, color: 'enterprise', milestone: false, badges: [], items: ['Enterprise API Development', 'FusionAuth Configuration for Partners'] },
-      { stream: 'enterprise', lane: 'dev', month: 2, color: 'enterprise', milestone: false, badges: [], items: ['Procore Integration Kick-off'] },
-      { stream: 'enterprise', lane: 'dev', month: 3, color: 'enterprise', milestone: false, badges: [], items: ['Procore API Integration Development'] },
-      { stream: 'enterprise', lane: 'release', month: 2, color: 'enterprise', milestone: true, badges: [], items: ['Enterprise API — MVP Release'] },
-      { stream: 'enterprise', lane: 'release', month: 4, color: 'enterprise', milestone: true, badges: [], items: ['Procore API Integration — Beta Release'] },
-
-      // ── Commerce ──
-      { stream: 'commerce', lane: 'dev', month: 0, color: 'commerce', milestone: false, badges: ['catina'], items: ['DOD+ Entitlements - Catina'] },
-      { stream: 'commerce', lane: 'dev', month: 0, color: 'commerce', milestone: false, badges: ['ecomm'], items: ['DOD+ Entitlements - eCommerce'] },
-      { stream: 'commerce', lane: 'dev', month: 1, color: 'commerce', milestone: false, badges: [], items: ['DOD+ Entitlements', 'DOD+ Purchase Migrations', 'eComm — Enhancements'] },
-      { stream: 'commerce', lane: 'dev', month: 2, color: 'commerce', milestone: false, badges: [], items: ['eComm — Ongoing Marketing Enhancements'] },
-      { stream: 'commerce', lane: 'dev', month: 3, color: 'commerce', milestone: false, badges: [], items: ['eComm — Ongoing Marketing Enhancements'] },
-      { stream: 'commerce', lane: 'dev', month: 4, color: 'commerce', milestone: false, badges: [], items: ['eComm — Ongoing Marketing Enhancements'] },
-
-      // ── Define the Meter (UBP) ──
-      { stream: 'ubp', lane: 'dev', month: 0, color: 'ubp', milestone: false, badges: ['product'], items: ['Requirement Gathering'] },
-      { stream: 'ubp', lane: 'dev', month: 0, color: 'ubp', milestone: false, badges: [], label: 'eCommerce', items: ['eComm: Stripe UBP scoping'] },
-      { stream: 'ubp', lane: 'dev', month: 0, color: 'ubp', milestone: false, badges: ['catina'], items: ['Catina: staged UI rollout scoping'] },
-      { stream: 'ubp', lane: 'dev', month: 1, color: 'ubp', milestone: false, badges: [], items: ['Metered billing architecture', 'Usage tracking instrumentation'] },
-      { stream: 'ubp', lane: 'dev', month: 1, color: 'ubp', milestone: false, badges: ['catina'], items: ['Any Outstanding Usage Based Statistics'] },
-      { stream: 'ubp', lane: 'dev', month: 1, color: 'ubp', milestone: false, badges: ['catina'], items: ['Integrate Usage Based Pricing into v2 Editor'] },
-      { stream: 'ubp', lane: 'dev', month: 1, color: 'ubp', milestone: false, badges: ['ecomm'], items: ['Estuate Scoping and Requirement Writing'] },
-      { stream: 'ubp', lane: 'dev', month: 2, color: 'ubp', milestone: false, badges: ['ecomm'], items: ['Implement Usage Based Pricing'] },
-      { stream: 'ubp', lane: 'dev', month: 2, color: 'ubp', milestone: false, badges: ['catina'], items: ['Usage Based UI Elements - Next Items'] },
-      { stream: 'ubp', lane: 'dev', month: 3, color: 'ubp', milestone: false, badges: [], items: ['Customer-facing usage dashboard'] },
-      { stream: 'ubp', lane: 'dev', month: 3, color: 'ubp-ecomm', milestone: false, badges: [], label: 'eCommerce', items: ['eCommerce — Stripe — Usage Based Pricing (cont.)'] },
-      { stream: 'ubp', lane: 'dev', month: 4, color: 'ubp-ecomm', milestone: false, badges: [], label: 'eCommerce', items: ['eCommerce — Stripe — UBP finalization'] },
-      { stream: 'ubp', lane: 'dev', month: 4, color: 'ubp', milestone: false, badges: ['catina'], items: ['Customers Usage Based Statistics'] },
-      { stream: 'ubp', lane: 'release', month: 1, color: 'ubp', milestone: false, badges: ['catina'], items: ['Finalization Address Mismatch Flow'] },
-      { stream: 'ubp', lane: 'release', month: 1, color: 'ubp', milestone: false, badges: ['ecomm'], items: ['Estuate POC in Our Env'] },
-
-      // ── Platform ──
-      { stream: 'platform', lane: 'dev', month: 1, color: 'platform', milestone: false, badges: [], items: ['Increased logging in Catina (~10% of effort)', 'API / front-end containerization / Doc Certificate', 'Minor enhancements to SC v1; begin rebuilding separately'] },
-      { stream: 'platform', lane: 'dev', month: 2, color: 'platform', milestone: false, badges: [], items: ['Increased logging in Catina (~10% of effort)', 'Fusion Auth rollout', 'Development of SCV2'] },
-      { stream: 'platform', lane: 'dev', month: 3, color: 'platform', milestone: false, badges: [], items: ['Fusion Auth rollout'] },
-      { stream: 'platform', lane: 'release', month: 0, color: 'platform', milestone: false, badges: [], items: ['License transfer tooling', 'Migration status page'] },
-      { stream: 'platform', lane: 'release', month: 3, color: 'platform', milestone: true, badges: ['platform'], items: ['Deliver SCv2'] },
-    ];
-    return t.map((tile) => ({ ...tile, id: this.nextId() }));
+    if (!this.current) return;
+    this.storage.save(this.current, (s) => (this.saveState = s));
   }
 }

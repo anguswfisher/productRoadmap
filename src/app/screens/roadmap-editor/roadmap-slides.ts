@@ -1,6 +1,6 @@
 // Builds a PowerPoint (.pptx) deck from the current roadmap: a title slide plus
 // one slide per value stream (a Dev/Release × months table of that stream's items).
-import { StreamDef, MonthDef, Lane, AppDef, Tile } from './roadmap-model';
+import { StreamDef, MonthDef, Lane, AppDef, Tile, COLOR_HEX } from './roadmap-model';
 
 export interface SlidesData {
   streams: StreamDef[];
@@ -8,18 +8,8 @@ export interface SlidesData {
   lanes: { key: Lane; label: string }[];
   apps: AppDef[];
   tiles: Tile[];
+  title?: string;
 }
-
-// Stream accent colors (hex, no '#') roughly matching the on-screen palette.
-const STREAM_COLOR: Record<string, string> = {
-  catina: '2E86C1',
-  'ai-assistant': '7C3AED',
-  risk: 'C2185B',
-  enterprise: '2E7D32',
-  commerce: 'C2410C',
-  ubp: 'B45309',
-  platform: '475569',
-};
 
 function cellText(tiles: Tile[]): string {
   if (!tiles.length) return '';
@@ -53,7 +43,7 @@ export async function exportRoadmapSlides(data: SlidesData): Promise<void> {
     color: '1A1D24',
     align: 'center',
   });
-  title.addText('What we’re building, and when', {
+  title.addText(data.title ?? 'What we’re building, and when', {
     x: 0.5,
     y: 3.6,
     w: 12.33,
@@ -62,8 +52,11 @@ export async function exportRoadmapSlides(data: SlidesData): Promise<void> {
     color: '5F6573',
     align: 'center',
   });
+  const windowText = data.months.length
+    ? `${data.months[0].month} – ${data.months[data.months.length - 1].month}`
+    : '';
   title.addText(
-    `May – September 2026   ·   Generated ${new Date().toLocaleDateString('en-US', {
+    `${windowText}   ·   Generated ${new Date().toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -86,7 +79,7 @@ export async function exportRoadmapSlides(data: SlidesData): Promise<void> {
 
   for (const s of data.streams) {
     const slide = pptx.addSlide();
-    const color = STREAM_COLOR[s.key] ?? '475569';
+    const color = COLOR_HEX[s.color] ?? '475569';
 
     slide.addText(s.name, {
       x: 0.4,
