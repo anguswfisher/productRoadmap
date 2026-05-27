@@ -21,6 +21,7 @@
     "@supabase/supabase-js": "^2.106.2",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "pptxgenjs": "^4.0.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.14.3"

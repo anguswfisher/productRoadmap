@@ -336,6 +336,27 @@ export class RoadmapEditorComponent {
     }
   }
 
+  slidesBusy = false;
+
+  async exportSlides(): Promise<void> {
+    if (this.slidesBusy) return;
+    this.slidesBusy = true;
+    try {
+      const { exportRoadmapSlides } = await import('./roadmap-slides');
+      await exportRoadmapSlides({
+        streams: this.streams,
+        months: this.months,
+        lanes: this.lanes,
+        apps: this.apps,
+        tiles: this.tiles,
+      });
+    } catch (err) {
+      console.error('Slides export failed:', err);
+    } finally {
+      this.slidesBusy = false;
+    }
+  }
+
   async copyEmbed(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.buildHtml());

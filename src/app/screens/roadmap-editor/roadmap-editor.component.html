@@ -9,6 +9,7 @@
       <span class="save-status" [ngClass]="saveState">{{ saveLabel }}</span>
       <button class="btn-export" type="button" (click)="exportHtml()">⬇ Export Embeddable HTML</button>
       <button class="btn-export" type="button" [disabled]="pdfBusy" (click)="exportPdf()">{{ pdfBusy ? 'Generating…' : '⬇ Export PDF' }}</button>
+      <button class="btn-export" type="button" [disabled]="slidesBusy" (click)="exportSlides()">{{ slidesBusy ? 'Generating…' : '⬇ Export Slides' }}</button>
       <button class="btn-export" type="button" (click)="copyEmbed()">{{ copied ? '✓ Copied!' : '⧉ Copy Embed Code' }}</button>
       <button class="btn-reset" type="button" (click)="resetToDefault()">Reset to default</button>
     </div>
