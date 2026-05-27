@@ -1,7 +1,8 @@
-<nav class="app-nav">
+<nav class="app-nav" *ngIf="isLoggedIn$ | async">
   <span class="app-brand">ACD Product Roadmap</span>
   <a routerLink="/roadmap-editor" routerLinkActive="active">Editor</a>
   <a routerLink="/roadmap" routerLinkActive="active">Read-only view</a>
+  <button class="app-logout" type="button" (click)="logout()">Log out</button>
 </nav>
 
 <main class="app-main">

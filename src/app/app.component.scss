@@ -26,6 +26,23 @@
       color: #111827;
     }
   }
+
+  .app-logout {
+    margin-left: 16px;
+    padding: 6px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    color: #6b7280;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+      color: #111827;
+      border-color: #d1d5db;
+    }
+  }
 }
 
 .app-main {
