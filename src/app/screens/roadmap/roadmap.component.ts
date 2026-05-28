@@ -1,6 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { buildRoadmapHtml } from '../roadmap-editor/roadmap-export';
 import {
@@ -19,6 +20,7 @@ import {
   quarterMonths,
   quarterLabel,
   combineRoadmaps,
+  rollingWindow,
 } from '../roadmap-editor/roadmap-model';
 
 interface RenderPayload {
@@ -35,14 +37,16 @@ interface RenderPayload {
 @Component({
   selector: 'app-roadmap',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterLink],
   templateUrl: './roadmap.component.html',
   styleUrls: ['./roadmap.component.scss'],
 })
 export class RoadmapComponent implements OnInit {
   published: Roadmap[] = [];
   selectedId: string | null = null;
-  mode: 'quarter' | 'timeline' = 'quarter';
+  mode: 'quarter' | 'timeline' | 'rolling' = 'quarter';
+  rollingMonths = 3;
+  readonly rollingOptions = [1, 2, 3, 6];
   html: SafeHtml | null = null;
   loading = true;
   error = false;
@@ -74,11 +78,29 @@ export class RoadmapComponent implements OnInit {
     return quarterLabel(r.quarter, r.year);
   }
 
-  setMode(mode: 'quarter' | 'timeline'): void {
+  setMode(mode: 'quarter' | 'timeline' | 'rolling'): void {
     this.mode = mode;
     if (mode === 'timeline') this.renderTimeline();
+    else if (mode === 'rolling') this.renderRolling();
     else if (this.selectedId) this.select(this.selectedId);
     else if (this.published.length) this.select(this.published[0].id);
+  }
+
+  setRollingMonths(n: number): void {
+    this.rollingMonths = n;
+    if (this.mode === 'rolling') this.renderRolling();
+  }
+
+  private renderRolling(): void {
+    const c = rollingWindow(this.published, this.rollingMonths);
+    this.render({
+      streams: c.streams,
+      months: c.months,
+      lanes: LANES,
+      apps: APPS,
+      tiles: c.tiles,
+      title: c.title,
+    });
   }
 
   select(id: string): void {

@@ -58,6 +58,7 @@ import { AuthService } from '../../auth/auth.service';
           </p>
 
           <a class="view-btn" routerLink="/roadmap">View roadmap →</a>
+          <a class="view-btn secondary" routerLink="/next">What's coming next →</a>
         </section>
       </div>
     </div>
@@ -180,6 +181,17 @@ import { AuthService } from '../../auth/auth.service';
         transition: border-color 0.15s, color 0.15s;
       }
       .view-btn:hover {
+        border-color: #a1a1aa;
+        color: #18181b;
+      }
+      .view-btn.secondary {
+        margin-top: 8px;
+        background: transparent;
+        border-color: #e4e4e7;
+        color: #71717a;
+        font-weight: 500;
+      }
+      .view-btn.secondary:hover {
         border-color: #a1a1aa;
         color: #18181b;
       }

@@ -1,7 +1,7 @@
 // Generates a self-contained, read-only HTML snapshot of the roadmap —
 // the same "Export Embeddable HTML" output as the original tool.
 
-interface ExportStream { key: string; name: string; meta: string; color: string; }
+interface ExportStream { key: string; name: string; meta: string; color: string; devopsLink?: string; }
 interface ExportMonth { month: string; quarter: string; current: boolean; }
 interface ExportLane { key: string; label: string; }
 interface ExportApp { key: string; label: string; badgeClass: string; }
@@ -15,6 +15,7 @@ interface ExportTile {
   label?: string;
   items: string[];
   createdBy?: string[];
+  link?: string;
 }
 
 export interface ExportData {
@@ -103,6 +104,8 @@ const ROADMAP_CSS = `
   .stream-label.ubp{border-left-color:var(--ubp);}
   .stream-label .stream-name{font-family:'Fraunces',serif;font-weight:500;font-size:19px;letter-spacing:-0.015em;line-height:1.15;}
   .stream-label .stream-meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);margin-top:6px;letter-spacing:.08em;text-transform:uppercase;}
+  .stream-label .stream-link{display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.7;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;align-self:flex-start;}
+  .stream-label .stream-link:hover{opacity:1;}
   .lane-label{background:var(--bg-soft);padding:14px;display:flex;align-items:center;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);font-weight:600;gap:8px;}
   .lane-label .lane-icon{display:inline-block;width:14px;height:10px;border-radius:3px;flex-shrink:0;}
   .lane-label.dev .lane-icon{background:#f0eee8;border:1px dashed var(--border-strong);}
@@ -147,6 +150,11 @@ const ROADMAP_CSS = `
   .tile-item+.tile-item{padding-top:4px;border-top:1px dashed rgba(0,0,0,.1);}
   .tile-created-by{margin-top:7px;padding-top:6px;border-top:1px dashed rgba(0,0,0,.1);font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:.02em;}
   .tile-created-by-label{text-transform:uppercase;letter-spacing:.1em;opacity:.7;margin-right:4px;}
+  .tile-link{display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.75;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;align-self:flex-start;}
+  .tile-link:hover{opacity:1;}
+  .disclaimer{display:flex;align-items:center;gap:14px;padding:14px 40px;background:#fef3c7;border-top:1px solid #f59e0b;border-bottom:1px solid #f59e0b;border-left:6px solid #b45309;color:#78350f;font-size:13.5px;line-height:1.45;font-weight:500;}
+  .disclaimer .badge{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:5px 12px;border-radius:999px;background:#b45309;color:#fff;white-space:nowrap;flex-shrink:0;}
+  .disclaimer strong{font-weight:700;color:#78350f;}
   .footer{margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:20px;}
   .footer-block{background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:20px 22px;}
   .footer-block h4{font-size:11px;color:var(--accent);letter-spacing:.14em;text-transform:uppercase;margin-bottom:10px;font-weight:700;}
@@ -178,7 +186,10 @@ function renderTile(t: ExportTile, apps: ExportApp[]): string {
   const createdBy = t.createdBy && t.createdBy.length
     ? `<div class="tile-created-by"><span class="tile-created-by-label">By</span>${esc(t.createdBy.join(', '))}</div>`
     : '';
-  return `<div class="${cls}">${label}${badges}${items}${createdBy}</div>`;
+  const link = t.link
+    ? `<a class="tile-link" href="${esc(t.link)}" target="_blank" rel="noopener">↗ Link</a>`
+    : '';
+  return `<div class="${cls}">${label}${badges}${items}${link}${createdBy}</div>`;
 }
 
 export function buildRoadmapHtml(data: ExportData): string {
@@ -215,7 +226,10 @@ export function buildRoadmapHtml(data: ExportData): string {
           return laneLabel + cells;
         })
         .join('');
-      return `<div class="stream-row"><div class="stream-label ${s.color}"><div class="stream-name">${esc(s.name)}</div><div class="stream-meta">${esc(s.meta)}</div></div>${lanesHtml}</div>`;
+      const link = s.devopsLink
+        ? `<a class="stream-link" href="${esc(s.devopsLink)}" target="_blank" rel="noopener">↗ DevOps</a>`
+        : '';
+      return `<div class="stream-row"><div class="stream-label ${s.color}"><div class="stream-name">${esc(s.name)}</div><div class="stream-meta">${esc(s.meta)}</div>${link}</div>${lanesHtml}</div>`;
     })
     .join('');
 
@@ -243,6 +257,7 @@ export function buildRoadmapHtml(data: ExportData): string {
 <style>${ROADMAP_CSS}</style>
 </head>
 <body>
+${chrome ? `<div class="disclaimer"><span class="badge">⚠ Internal use only</span><span>This roadmap reflects our <strong>current best-guess of commitments</strong> — dates and scope can change. Please be thoughtful when communicating any of this to customers.</span></div>` : ''}
 ${chrome ? `<div class="banner">
   <div class="banner-left">
     <div class="brand">Product<span class="light">Roadmap</span></div>
@@ -274,23 +289,6 @@ ${chrome ? `<div class="banner">
     ${monthHeaders}
     ${streamRows}
   </div>
-  ${chrome ? `<div class="footer">
-    <div class="footer-block">
-      <h4>How to read this</h4>
-      <p>Each stream has two lanes: <strong>Dev / Testing</strong> (dashed border) shows work in progress, and <strong>Releases</strong> (solid fill) shows what's shipping.</p>
-      <div class="legend-mini">
-        <div><span class="star">★</span> Major milestone / GA</div>
-        <div><span class="legend-dot" style="background:var(--accent);width:10px;height:10px;border-radius:50%;display:inline-block;"></span> Current month</div>
-      </div>
-    </div>
-    <div class="footer-block">
-      <h4>Notes &amp; mapping decisions</h4>
-      <p><strong style="color:var(--catina-text);">Catina:</strong> Editor work, migration, Project Meter, and Collaboration tooling.<br>
-      <strong style="color:var(--commerce-text);">Commerce &amp; Buying Journey:</strong> DOD+ entitlements/migrations, eComm enhancements, Stripe pricing.<br>
-      <strong style="color:var(--ubp-text);">Define the Meter:</strong> Usage Based Pricing and Staged Approach to UI Elements.<br>
-      <strong style="color:var(--platform-text);">Platform &amp; Internal Tooling:</strong> Software tooling/packaging, Fusion Auth, SCV2, internal apps.</p>
-    </div>
-  </div>` : ''}
 </div>
 </body></html>`;
 }

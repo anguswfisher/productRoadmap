@@ -24,5 +24,20 @@ export const routes: Routes = [
         (m) => m.RoadmapComponent,
       ),
   },
+  {
+    // Backlog of items not yet slotted into a roadmap (team-only).
+    path: 'next-editor',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./screens/next/next-editor.component').then(
+        (m) => m.NextEditorComponent,
+      ),
+  },
+  {
+    // Public, read-only "what's coming next".
+    path: 'next',
+    loadComponent: () =>
+      import('./screens/next/next.component').then((m) => m.NextComponent),
+  },
   { path: '**', redirectTo: 'roadmap-editor' },
 ];

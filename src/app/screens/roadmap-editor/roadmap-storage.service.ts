@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { supabase, isSupabaseConfigured } from '../../auth/supabase-client';
 import { Roadmap, StreamDef, Tile } from './roadmap-model';
+import { NextDoc, NextItem } from '../next/next-model';
 
 // ── Supabase table (run once in the SQL editor) ─────────────────────
 //
@@ -44,10 +45,14 @@ function toRoadmap(row: RoadmapRow): Roadmap {
   };
 }
 
+const NEXT_ID = 'default';
+
 @Injectable({ providedIn: 'root' })
 export class RoadmapStorageService {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pending: Roadmap | null = null;
+  private nextFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private nextPending: NextDoc | null = null;
 
   get enabled(): boolean {
     return isSupabaseConfigured;
@@ -145,5 +150,59 @@ export class RoadmapStorageService {
         updated_at: new Date().toISOString(),
       })
       .eq('id', roadmap.id);
+  }
+
+  // ── "What's coming next" doc ────────────────────────────────────
+  /** Returns the single Next-Items doc. RLS handles public vs auth visibility. */
+  async getNext(): Promise<NextDoc> {
+    if (!isSupabaseConfigured) return { items: [], published: false };
+    const { data, error } = await supabase
+      .from('next_items')
+      .select('items,published')
+      .eq('id', NEXT_ID)
+      .maybeSingle();
+    if (error) {
+      console.error('Next items load failed:', error.message);
+      return { items: [], published: false };
+    }
+    return {
+      items: (data?.items as NextItem[]) ?? [],
+      published: !!data?.published,
+    };
+  }
+
+  /** Immediate save (publish toggle, structural change). */
+  async saveNextNow(doc: NextDoc, onState?: (s: SaveState) => void): Promise<void> {
+    if (!isSupabaseConfigured) return;
+    onState?.('saving');
+    const { error } = await this.writeNext(doc);
+    onState?.(error ? 'error' : 'saved');
+  }
+
+  /** Debounced save (item edits). */
+  saveNext(doc: NextDoc, onState?: (s: SaveState) => void): void {
+    if (!isSupabaseConfigured) return;
+    this.nextPending = doc;
+    onState?.('saving');
+    if (this.nextFlushTimer) clearTimeout(this.nextFlushTimer);
+    this.nextFlushTimer = setTimeout(() => void this.flushNext(onState), FLUSH_DELAY_MS);
+  }
+
+  private async flushNext(onState?: (s: SaveState) => void): Promise<void> {
+    this.nextFlushTimer = null;
+    if (this.nextPending === null) return;
+    const doc = this.nextPending;
+    this.nextPending = null;
+    const { error } = await this.writeNext(doc);
+    onState?.(error ? 'error' : 'saved');
+  }
+
+  private async writeNext(doc: NextDoc) {
+    return supabase.from('next_items').upsert({
+      id: NEXT_ID,
+      items: doc.items,
+      published: doc.published,
+      updated_at: new Date().toISOString(),
+    });
   }
 }

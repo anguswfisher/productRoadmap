@@ -20,12 +20,17 @@ import {
   Roadmap,
   LANES,
   APPS,
+  COLOR_PALETTE,
+  ColorKey,
   quarterMonths,
   quarterLabel,
   nextColor,
   genId,
   combineRoadmaps,
+  rollingWindow,
 } from './roadmap-model';
+
+export type EditorMode = 'edit' | 'timeline' | 'rolling';
 
 @Component({
   selector: 'app-roadmap-editor',
@@ -57,6 +62,14 @@ export class RoadmapEditorComponent {
   // Add-initiative
   newInitiativeName = '';
 
+  // Edit-initiative modal
+  editInitiativeOpen = false;
+  editingInitiativeKey: StreamKey | null = null;
+  editName = '';
+  editMeta = '';
+  editColor: ColorKey = 'platform';
+  editLink = '';
+
   // Drag state
   private draggingId: string | null = null;
   dragOverKey: string | null = null;
@@ -69,12 +82,16 @@ export class RoadmapEditorComponent {
   modalMilestone = false;
   modalBadges = new Set<AppKey>();
   modalCreatedBy = new Set<string>();
+  modalLink = '';
 
   copied = false;
   saveState: SaveState = 'idle';
 
-  // Full-timeline (read-only) mode: stitches every roadmap into one wide grid.
-  timelineMode = false;
+  // Editor mode: 'edit' (live grid for one quarter) | 'timeline' (all quarters stitched) | 'rolling' (next N months from today).
+  mode: EditorMode = 'edit';
+  rollingMonths = 3;
+  readonly rollingOptions = [1, 2, 3, 6];
+  readonly palette: ColorKey[] = COLOR_PALETTE;
   timelineHtml: SafeHtml | null = null;
 
   constructor(
@@ -84,12 +101,25 @@ export class RoadmapEditorComponent {
     void this.init();
   }
 
-  setTimeline(on: boolean): void {
-    if (on === this.timelineMode) return;
-    this.timelineMode = on;
-    this.timelineHtml = on
-      ? this.sanitizer.bypassSecurityTrustHtml(this.buildHtml(false))
-      : null;
+  get timelineMode(): boolean {
+    return this.mode !== 'edit';
+  }
+
+  setMode(mode: EditorMode): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.refreshView();
+  }
+
+  setRollingMonths(n: number): void {
+    this.rollingMonths = n;
+    if (this.mode === 'rolling') this.refreshView();
+  }
+
+  private refreshView(): void {
+    this.timelineHtml = this.mode === 'edit'
+      ? null
+      : this.sanitizer.bypassSecurityTrustHtml(this.buildHtml(false));
   }
 
   // ── Convenience accessors ───────────────────────────────────────
@@ -192,6 +222,50 @@ export class RoadmapEditorComponent {
     this.current.initiatives.push({ key: genId('init'), name, meta: '', color });
     this.newInitiativeName = '';
     this.persist();
+  }
+
+  openEditInitiative(stream: StreamKey, event?: Event): void {
+    event?.stopPropagation();
+    const init = this.current?.initiatives.find((s) => s.key === stream);
+    if (!init) return;
+    this.editingInitiativeKey = init.key;
+    this.editName = init.name;
+    this.editMeta = init.meta ?? '';
+    this.editColor = init.color;
+    this.editLink = init.devopsLink ?? '';
+    this.editInitiativeOpen = true;
+  }
+
+  closeEditInitiative(): void {
+    this.editInitiativeOpen = false;
+    this.editingInitiativeKey = null;
+  }
+
+  pickEditColor(color: ColorKey): void {
+    this.editColor = color;
+  }
+
+  saveEditInitiative(): void {
+    if (!this.current || !this.editingInitiativeKey) return;
+    const init = this.current.initiatives.find((s) => s.key === this.editingInitiativeKey);
+    if (!init) return;
+    const newName = this.editName.trim();
+    if (!newName) return;
+    const prevColor = init.color;
+    init.name = newName;
+    init.meta = this.editMeta.trim();
+    init.color = this.editColor;
+    init.devopsLink = this.editLink.trim() || undefined;
+    // If color changed, recolor that initiative's tiles too.
+    if (prevColor !== init.color) {
+      for (const t of this.current.tiles) {
+        if (t.stream === init.key && t.color === prevColor) {
+          t.color = init.color;
+        }
+      }
+    }
+    this.persist();
+    this.closeEditInitiative();
   }
 
   removeInitiative(stream: StreamKey, event: Event): void {
@@ -312,6 +386,7 @@ export class RoadmapEditorComponent {
     this.modalMilestone = false;
     this.modalBadges = new Set<AppKey>();
     this.modalCreatedBy = new Set<string>();
+    this.modalLink = '';
     this.modalOpen = true;
   }
 
@@ -322,6 +397,7 @@ export class RoadmapEditorComponent {
     this.modalMilestone = tile.milestone;
     this.modalBadges = new Set<AppKey>(tile.badges);
     this.modalCreatedBy = new Set<string>(tile.createdBy ?? []);
+    this.modalLink = tile.link ?? '';
     this.modalOpen = true;
   }
 
@@ -351,6 +427,8 @@ export class RoadmapEditorComponent {
     const items = this.modalText.split('\n').map((s) => s.trim()).filter(Boolean);
     if (items.length === 0) return;
 
+    const link = this.modalLink.trim() || undefined;
+
     if (this.editingTileId) {
       const tile = this.current.tiles.find((t) => t.id === this.editingTileId);
       if (tile) {
@@ -358,6 +436,7 @@ export class RoadmapEditorComponent {
         tile.milestone = this.modalMilestone;
         tile.badges = Array.from(this.modalBadges);
         tile.createdBy = Array.from(this.modalCreatedBy);
+        tile.link = link;
       }
     } else {
       const init = this.streams.find((s) => s.key === this.modalCell!.stream);
@@ -371,6 +450,7 @@ export class RoadmapEditorComponent {
         badges: Array.from(this.modalBadges),
         items,
         createdBy: Array.from(this.modalCreatedBy),
+        link,
       });
     }
     this.persist();
@@ -379,24 +459,26 @@ export class RoadmapEditorComponent {
 
   // ── Export ──────────────────────────────────────────────────────
   private exportPayload() {
-    if (this.timelineMode) {
+    if (this.mode === 'timeline') {
       const c = combineRoadmaps(this.roadmaps);
       return {
-        streams: c.streams,
-        months: c.months,
-        lanes: this.lanes,
-        apps: this.apps,
-        tiles: c.tiles,
-        title: c.title,
+        streams: c.streams, months: c.months,
+        lanes: this.lanes, apps: this.apps,
+        tiles: c.tiles, title: c.title,
+      };
+    }
+    if (this.mode === 'rolling') {
+      const c = rollingWindow(this.roadmaps, this.rollingMonths);
+      return {
+        streams: c.streams, months: c.months,
+        lanes: this.lanes, apps: this.apps,
+        tiles: c.tiles, title: c.title,
       };
     }
     return {
-      streams: this.streams,
-      months: this.months,
-      lanes: this.lanes,
-      apps: this.apps,
-      tiles: this.tiles,
-      title: this.currentLabel,
+      streams: this.streams, months: this.months,
+      lanes: this.lanes, apps: this.apps,
+      tiles: this.tiles, title: this.currentLabel,
     };
   }
 
@@ -405,7 +487,10 @@ export class RoadmapEditorComponent {
   }
 
   private exportFileName(ext: string): string {
-    const base = this.timelineMode ? 'full-timeline' : this.currentLabel;
+    let base: string;
+    if (this.mode === 'timeline') base = 'full-timeline';
+    else if (this.mode === 'rolling') base = `next-${this.rollingMonths}-months`;
+    else base = this.currentLabel;
     return `roadmap-${base.replace(/\s+/g, '-')}.${ext}`;
   }
 

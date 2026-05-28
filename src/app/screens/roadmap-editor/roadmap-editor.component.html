@@ -1,4 +1,12 @@
 <div class="roadmap-editor">
+  <div class="disclaimer" role="note">
+    <span class="disclaimer-badge">⚠ Internal use only</span>
+    <span class="disclaimer-text">
+      This roadmap reflects our <strong>current best-guess of commitments</strong> — dates and scope can change.
+      Please be thoughtful when communicating any of this to customers.
+    </span>
+  </div>
+
   <div class="title-row">
     <div class="eyebrow">Product Roadmap</div>
     <h1 *ngIf="current">ACD Product Roadmap <em>· {{ currentLabel }}</em></h1>
@@ -7,11 +15,19 @@
 
   <div class="toolbar">
     <div class="mode-toggle" *ngIf="roadmaps.length">
-      <button type="button" [class.active]="!timelineMode" (click)="setTimeline(false)">Edit</button>
-      <button type="button" [class.active]="timelineMode" (click)="setTimeline(true)">Full timeline</button>
+      <button type="button" [class.active]="mode === 'edit'" (click)="setMode('edit')">Edit</button>
+      <button type="button" [class.active]="mode === 'timeline'" (click)="setMode('timeline')">Full timeline</button>
+      <button type="button" [class.active]="mode === 'rolling'" (click)="setMode('rolling')">Rolling</button>
     </div>
 
-    <ng-container *ngIf="!timelineMode">
+    <ng-container *ngIf="mode === 'rolling'">
+      <span class="picker-label">Window</span>
+      <select class="toolbar-select" [ngModel]="rollingMonths" (ngModelChange)="setRollingMonths(+$event)">
+        <option *ngFor="let n of rollingOptions" [ngValue]="n">Next {{ n }} months</option>
+      </select>
+    </ng-container>
+
+    <ng-container *ngIf="mode === 'edit'">
       <span class="picker-label">Roadmap</span>
       <select
         class="toolbar-select"
@@ -68,7 +84,7 @@
     title="Full roadmap timeline"
   ></iframe>
 
-  <ng-container *ngIf="current && !timelineMode">
+  <ng-container *ngIf="current && mode === 'edit'">
     <div class="legend">
       <div
         class="legend-pill"
@@ -77,7 +93,6 @@
         (click)="toggleStream(s.key)"
       >
         <span class="legend-dot" [ngClass]="s.color"></span>{{ s.name }}
-        <button class="legend-remove" type="button" title="Remove initiative" (click)="removeInitiative(s.key, $event)">×</button>
       </div>
 
       <div class="add-initiative">
@@ -108,8 +123,31 @@
       <ng-container *ngFor="let s of streams; trackBy: trackStream">
         <div class="stream-row" *ngIf="isStreamActive(s.key)">
           <div class="stream-label" [ngClass]="s.color">
+            <div class="stream-actions">
+              <button
+                class="stream-edit"
+                type="button"
+                title="Edit initiative"
+                (click)="openEditInitiative(s.key, $event)"
+              >✎</button>
+              <button
+                class="stream-remove"
+                type="button"
+                title="Remove initiative"
+                (click)="removeInitiative(s.key, $event)"
+              >×</button>
+            </div>
             <div class="stream-name">{{ s.name }}</div>
             <div class="stream-meta">{{ s.meta }}</div>
+            <a
+              class="stream-link"
+              *ngIf="s.devopsLink"
+              [href]="s.devopsLink"
+              target="_blank"
+              rel="noopener"
+              (click)="$event.stopPropagation()"
+              title="Open in Azure DevOps"
+            >↗ DevOps</a>
           </div>
 
           <ng-container *ngFor="let lane of lanes">
@@ -160,6 +198,17 @@
                   >{{ item }}</div>
                 </div>
 
+                <a
+                  class="tile-link"
+                  *ngIf="tile.link"
+                  [href]="tile.link"
+                  target="_blank"
+                  rel="noopener"
+                  (click)="$event.stopPropagation()"
+                  (mousedown)="$event.stopPropagation()"
+                  title="Open link"
+                >↗ Link</a>
+
                 <div class="tile-created-by" *ngIf="tile.createdBy?.length">
                   <span class="tile-created-by-label">By</span>
                   {{ tile.createdBy?.join(', ') }}
@@ -179,6 +228,41 @@
       </ng-container>
     </div>
   </ng-container>
+</div>
+
+<!-- EDIT INITIATIVE MODAL -->
+<div class="modal-overlay" [class.open]="editInitiativeOpen" (click)="closeEditInitiative()">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <h3>Edit initiative</h3>
+    <div class="modal-sub">Rename, recolor, add a DevOps link.</div>
+
+    <label>Name</label>
+    <input type="text" [(ngModel)]="editName" placeholder="Initiative name" />
+
+    <label>Tag / subtitle (optional)</label>
+    <input type="text" [(ngModel)]="editMeta" placeholder="Short descriptor" />
+
+    <label>Color</label>
+    <div class="color-swatches">
+      <button
+        type="button"
+        class="color-swatch"
+        *ngFor="let c of palette"
+        [ngClass]="c"
+        [class.selected]="editColor === c"
+        (click)="pickEditColor(c)"
+        [title]="c"
+      ></button>
+    </div>
+
+    <label>Azure DevOps link (optional)</label>
+    <input type="url" [(ngModel)]="editLink" placeholder="https://dev.azure.com/…" />
+
+    <div class="modal-actions">
+      <button class="btn-cancel" type="button" (click)="closeEditInitiative()">Cancel</button>
+      <button class="btn-add-submit" type="button" (click)="saveEditInitiative()">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- NEW ROADMAP MODAL -->
@@ -209,7 +293,7 @@
 <div class="modal-overlay" [class.open]="modalOpen" (click)="closeAdd()">
   <div class="modal" (click)="$event.stopPropagation()">
     <h3>{{ modalTitle }}</h3>
-    <div class="modal-sub">One line per item</div>
+    <div class="modal-sub">One work item per line. App badges, link, and attribution are optional.</div>
 
     <label>Items</label>
     <textarea
@@ -217,9 +301,17 @@
       placeholder="Enter each work item on its own line"
     ></textarea>
 
+    <label>Link (optional)</label>
+    <input
+      type="url"
+      [(ngModel)]="modalLink"
+      placeholder="https://… (Azure DevOps, Figma, doc, anything)"
+    />
+
     <label>App badges (optional)</label>
     <div class="app-chips">
-      <div
+      <button
+        type="button"
         class="app-chip"
         *ngFor="let app of apps"
         [attr.data-app]="app.key"
@@ -227,12 +319,12 @@
         (click)="toggleBadge(app.key)"
       >
         <span class="chip-dot" [style.background]="app.chipDotColor"></span>{{ app.label }}
-      </div>
+      </button>
     </div>
 
-    <label>Created by</label>
-    <div class="created-by-list">
-      <label class="created-by-option" *ngFor="let person of people">
+    <label>Created by (optional)</label>
+    <div class="created-by-grid">
+      <label class="check-option" *ngFor="let person of people">
         <input
           type="checkbox"
           [checked]="isPersonSelected(person)"
@@ -242,9 +334,9 @@
       </label>
     </div>
 
-    <label class="milestone-row">
+    <label class="check-option standalone">
       <input type="checkbox" [(ngModel)]="modalMilestone" />
-      <span>Mark as major milestone / GA (★)</span>
+      <span>Mark as a major milestone / GA <span class="milestone-star">★</span></span>
     </label>
 
     <div class="modal-actions">

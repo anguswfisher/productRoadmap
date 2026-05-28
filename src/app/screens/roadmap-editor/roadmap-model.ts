@@ -38,6 +38,7 @@ export interface Tile {
   label?: string;
   items: string[];
   createdBy?: string[];
+  link?: string;
 }
 
 // An "initiative" is a left-hand row. Created by the user; color auto-assigned.
@@ -46,6 +47,7 @@ export interface StreamDef {
   name: string;
   meta: string; // short tag / subtitle
   color: ColorKey;
+  devopsLink?: string;
 }
 
 export interface MonthDef {
@@ -209,6 +211,67 @@ export function combineRoadmaps(roadmaps: Roadmap[]): CombinedRoadmap {
     const l = sorted[sorted.length - 1];
     title = `${quarterLabel(f.quarter, f.year)} – ${quarterLabel(l.quarter, l.year)}`;
   }
+
+  return { streams, months, tiles, title };
+}
+
+/**
+ * Builds a rolling roadmap window starting at `anchor` (defaults to today),
+ * spanning `monthCount` months. Tiles from any roadmap whose absolute month
+ * falls in the window are remapped to their offset from the anchor. Useful for
+ * leader views like "what's coming up in the next 3/6/12 months."
+ */
+export function rollingWindow(
+  roadmaps: Roadmap[],
+  monthCount: number,
+  anchor: Date = new Date(),
+): CombinedRoadmap {
+  const baseY = anchor.getFullYear();
+  const baseM = anchor.getMonth();
+  const baseAbs = baseY * 12 + baseM;
+
+  const months: MonthDef[] = [];
+  for (let i = 0; i < monthCount; i++) {
+    const total = baseM + i;
+    const y = baseY + Math.floor(total / 12);
+    const mn = ((total % 12) + 12) % 12;
+    months.push({
+      month: MONTH_NAMES[mn],
+      quarter: `Q${Math.floor(mn / 3) + 1} · ${y}`,
+      current: i === 0,
+    });
+  }
+
+  const streams: StreamDef[] = [];
+  const seen = new Set<StreamKey>();
+  const tiles: Tile[] = [];
+
+  // Sort roadmaps chronologically so initiatives appear in a stable order.
+  const sorted = [...roadmaps].sort((a, b) => a.year - b.year || a.quarter - b.quarter);
+
+  for (const r of sorted) {
+    const rStartAbs = r.year * 12 + (r.quarter - 1) * 3;
+    const overlaps = rStartAbs + 2 >= baseAbs && rStartAbs <= baseAbs + monthCount - 1;
+    if (!overlaps) continue;
+
+    for (const init of r.initiatives) {
+      if (!seen.has(init.key)) {
+        seen.add(init.key);
+        streams.push(init);
+      }
+    }
+
+    for (const t of r.tiles) {
+      const offset = rStartAbs + t.month - baseAbs;
+      if (offset >= 0 && offset < monthCount) {
+        tiles.push({ ...t, id: `${r.id}:${t.id}`, month: offset });
+      }
+    }
+  }
+
+  const firstMonth = months[0]?.month ?? '';
+  const lastMonth = months[months.length - 1]?.month ?? '';
+  const title = `Next ${monthCount} months · ${firstMonth} – ${lastMonth}`;
 
   return { streams, months, tiles, title };
 }

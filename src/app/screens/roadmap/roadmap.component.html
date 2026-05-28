@@ -1,4 +1,12 @@
 <div class="roadmap-page">
+  <div class="disclaimer" role="note">
+    <span class="disclaimer-badge">⚠ Internal use only</span>
+    <span class="disclaimer-text">
+      This roadmap reflects our <strong>current best-guess of commitments</strong> — dates and scope can change.
+      Please be thoughtful when communicating any of this to customers.
+    </span>
+  </div>
+
   <div class="roadmap-status" *ngIf="loading">Loading roadmap…</div>
   <div class="roadmap-status" *ngIf="error">Sorry — the roadmap couldn't be loaded.</div>
   <div class="roadmap-status" *ngIf="!loading && !error && !published.length">
@@ -15,6 +23,7 @@
       <div class="mode-toggle">
         <button type="button" [class.active]="mode === 'quarter'" (click)="setMode('quarter')">By quarter</button>
         <button type="button" [class.active]="mode === 'timeline'" (click)="setMode('timeline')">Full timeline</button>
+        <button type="button" [class.active]="mode === 'rolling'" (click)="setMode('rolling')">Rolling</button>
       </div>
 
       <ng-container *ngIf="mode === 'quarter'">
@@ -23,6 +32,15 @@
           <option *ngFor="let r of published" [value]="r.id">{{ label(r) }}</option>
         </select>
       </ng-container>
+
+      <ng-container *ngIf="mode === 'rolling'">
+        <span class="picker-label">Window</span>
+        <select class="toolbar-select" [ngModel]="rollingMonths" (ngModelChange)="setRollingMonths(+$event)">
+          <option *ngFor="let n of rollingOptions" [ngValue]="n">Next {{ n }} months</option>
+        </select>
+      </ng-container>
+
+      <a class="toolbar-link" routerLink="/next">What's coming next →</a>
 
       <span class="bar-spacer"></span>
 

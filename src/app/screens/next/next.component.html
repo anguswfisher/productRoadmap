@@ -1,0 +1,56 @@
+<div class="next-page">
+  <div class="disclaimer" role="note">
+    <span class="disclaimer-badge">⚠ Internal use only</span>
+    <span class="disclaimer-text">
+      This list reflects our <strong>current best-guess of commitments</strong> — dates and scope can change.
+      Please be thoughtful when communicating any of this to customers.
+    </span>
+  </div>
+
+  <div class="title-row">
+    <div class="eyebrow">Backlog</div>
+    <h1>What's <em>coming next</em></h1>
+    <p class="title-sub">Items on our radar that aren't yet slotted into a specific quarter.</p>
+  </div>
+
+  <div class="toolbar">
+    <a class="toolbar-btn" routerLink="/roadmap">← Back to roadmap</a>
+    <span class="bar-spacer"></span>
+  </div>
+
+  <div class="next-status" *ngIf="loading">Loading…</div>
+  <div class="next-status" *ngIf="error">Sorry — couldn't load this list.</div>
+  <div class="next-status" *ngIf="!loading && !error && !hasItems">
+    No items published yet.
+  </div>
+
+  <div class="horizon-grid" *ngIf="!loading && !error && hasItems">
+    <section
+      class="horizon-col view"
+      *ngFor="let h of horizons"
+      [style.borderTopColor]="h.color"
+    >
+      <header class="horizon-header">
+        <div class="horizon-title" [style.color]="h.color">{{ h.label }}</div>
+        <div class="horizon-meta">{{ h.description }}</div>
+      </header>
+
+      <div class="item-list">
+        <div class="item-card view" *ngFor="let it of itemsFor(h.key)">
+          <div class="item-title-view">{{ it.title || '(untitled)' }}</div>
+          <div class="item-notes-view" *ngIf="it.notes">{{ it.notes }}</div>
+          <div class="item-chips view" *ngIf="it.badges?.length">
+            <span
+              class="item-chip view"
+              *ngFor="let b of it.badges"
+              [attr.data-app]="b"
+            >
+              <span class="chip-dot" [style.background]="appDef(b).chipDotColor"></span>{{ appDef(b).label }}
+            </span>
+          </div>
+        </div>
+        <div class="item-empty" *ngIf="!itemsFor(h.key).length">Nothing here yet.</div>
+      </div>
+    </section>
+  </div>
+</div>
