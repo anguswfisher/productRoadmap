@@ -198,16 +198,18 @@
                   >{{ item }}</div>
                 </div>
 
-                <a
-                  class="tile-link"
-                  *ngIf="tile.link"
-                  [href]="tile.link"
-                  target="_blank"
-                  rel="noopener"
-                  (click)="$event.stopPropagation()"
-                  (mousedown)="$event.stopPropagation()"
-                  title="Open link"
-                >↗ Link</a>
+                <div class="tile-links" *ngIf="tileLinks(tile).length">
+                  <a
+                    class="tile-link"
+                    *ngFor="let lk of tileLinks(tile)"
+                    [href]="lk.url"
+                    target="_blank"
+                    rel="noopener"
+                    (click)="$event.stopPropagation()"
+                    (mousedown)="$event.stopPropagation()"
+                    [title]="lk.label || lk.url"
+                  >↗ {{ lk.label || 'Link' }}</a>
+                </div>
 
                 <div class="tile-created-by" *ngIf="tile.createdBy?.length">
                   <span class="tile-created-by-label">By</span>
@@ -301,12 +303,33 @@
       placeholder="Enter each work item on its own line"
     ></textarea>
 
-    <label>Link (optional)</label>
-    <input
-      type="url"
-      [(ngModel)]="modalLink"
-      placeholder="https://… (Azure DevOps, Figma, doc, anything)"
-    />
+    <label>Links (optional)</label>
+    <div class="modal-links-list">
+      <div
+        class="modal-link-row"
+        *ngFor="let l of modalLinks; let i = index; trackBy: trackModalLink"
+      >
+        <input
+          type="text"
+          class="link-label"
+          [(ngModel)]="l.label"
+          placeholder="Name (PRD, Artifact…)"
+        />
+        <input
+          type="url"
+          class="link-url"
+          [(ngModel)]="l.url"
+          placeholder="https://…"
+        />
+        <button
+          type="button"
+          class="link-remove"
+          title="Remove link"
+          (click)="removeModalLink(i)"
+        >×</button>
+      </div>
+      <button type="button" class="modal-add-link" (click)="addModalLink()">+ Add link</button>
+    </div>
 
     <label>App badges (optional)</label>
     <div class="app-chips">

@@ -18,6 +18,7 @@ import {
   MonthDef,
   AppDef,
   Roadmap,
+  TileLink,
   LANES,
   APPS,
   COLOR_PALETTE,
@@ -82,7 +83,7 @@ export class RoadmapEditorComponent {
   modalMilestone = false;
   modalBadges = new Set<AppKey>();
   modalCreatedBy = new Set<string>();
-  modalLink = '';
+  modalLinks: TileLink[] = [];
 
   copied = false;
   saveState: SaveState = 'idle';
@@ -386,7 +387,7 @@ export class RoadmapEditorComponent {
     this.modalMilestone = false;
     this.modalBadges = new Set<AppKey>();
     this.modalCreatedBy = new Set<string>();
-    this.modalLink = '';
+    this.modalLinks = [];
     this.modalOpen = true;
   }
 
@@ -397,8 +398,25 @@ export class RoadmapEditorComponent {
     this.modalMilestone = tile.milestone;
     this.modalBadges = new Set<AppKey>(tile.badges);
     this.modalCreatedBy = new Set<string>(tile.createdBy ?? []);
-    this.modalLink = tile.link ?? '';
+    // Migrate legacy single `link` into the new list form.
+    this.modalLinks = tile.links?.map((l) => ({ label: l.label, url: l.url }))
+      ?? (tile.link ? [{ label: '', url: tile.link }] : []);
     this.modalOpen = true;
+  }
+
+  addModalLink(): void {
+    this.modalLinks.push({ label: '', url: '' });
+  }
+  removeModalLink(index: number): void {
+    this.modalLinks.splice(index, 1);
+  }
+  trackModalLink = (i: number) => i;
+
+  /** Returns the links to render on a tile (handles legacy single-link tiles). */
+  tileLinks(tile: Tile): TileLink[] {
+    if (tile.links && tile.links.length) return tile.links;
+    if (tile.link) return [{ label: '', url: tile.link }];
+    return [];
   }
 
   closeAdd(): void {
@@ -427,7 +445,9 @@ export class RoadmapEditorComponent {
     const items = this.modalText.split('\n').map((s) => s.trim()).filter(Boolean);
     if (items.length === 0) return;
 
-    const link = this.modalLink.trim() || undefined;
+    const links = this.modalLinks
+      .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
+      .filter((l) => l.url);
 
     if (this.editingTileId) {
       const tile = this.current.tiles.find((t) => t.id === this.editingTileId);
@@ -436,7 +456,8 @@ export class RoadmapEditorComponent {
         tile.milestone = this.modalMilestone;
         tile.badges = Array.from(this.modalBadges);
         tile.createdBy = Array.from(this.modalCreatedBy);
-        tile.link = link;
+        tile.links = links.length ? links : undefined;
+        tile.link = undefined; // clear legacy field
       }
     } else {
       const init = this.streams.find((s) => s.key === this.modalCell!.stream);
@@ -450,7 +471,7 @@ export class RoadmapEditorComponent {
         badges: Array.from(this.modalBadges),
         items,
         createdBy: Array.from(this.modalCreatedBy),
-        link,
+        links: links.length ? links : undefined,
       });
     }
     this.persist();

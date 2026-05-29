@@ -15,6 +15,7 @@ interface ExportTile {
   label?: string;
   items: string[];
   createdBy?: string[];
+  links?: { label: string; url: string }[];
   link?: string;
 }
 
@@ -150,7 +151,8 @@ const ROADMAP_CSS = `
   .tile-item+.tile-item{padding-top:4px;border-top:1px dashed rgba(0,0,0,.1);}
   .tile-created-by{margin-top:7px;padding-top:6px;border-top:1px dashed rgba(0,0,0,.1);font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:.02em;}
   .tile-created-by-label{text-transform:uppercase;letter-spacing:.1em;opacity:.7;margin-right:4px;}
-  .tile-link{display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.75;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;align-self:flex-start;}
+  .tile-links{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+  .tile-link{display:inline-flex;align-items:center;gap:4px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.75;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;}
   .tile-link:hover{opacity:1;}
   .disclaimer{display:flex;align-items:center;gap:14px;padding:14px 40px;background:#fef3c7;border-top:1px solid #f59e0b;border-bottom:1px solid #f59e0b;border-left:6px solid #b45309;color:#78350f;font-size:13.5px;line-height:1.45;font-weight:500;}
   .disclaimer .badge{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:5px 12px;border-radius:999px;background:#b45309;color:#fff;white-space:nowrap;flex-shrink:0;}
@@ -186,10 +188,15 @@ function renderTile(t: ExportTile, apps: ExportApp[]): string {
   const createdBy = t.createdBy && t.createdBy.length
     ? `<div class="tile-created-by"><span class="tile-created-by-label">By</span>${esc(t.createdBy.join(', '))}</div>`
     : '';
-  const link = t.link
-    ? `<a class="tile-link" href="${esc(t.link)}" target="_blank" rel="noopener">↗ Link</a>`
+  const linkList = (t.links && t.links.length)
+    ? t.links
+    : (t.link ? [{ label: '', url: t.link }] : []);
+  const linksHtml = linkList.length
+    ? `<div class="tile-links">${linkList
+        .map((l) => `<a class="tile-link" href="${esc(l.url)}" target="_blank" rel="noopener">↗ ${esc(l.label || 'Link')}</a>`)
+        .join('')}</div>`
     : '';
-  return `<div class="${cls}">${label}${badges}${items}${link}${createdBy}</div>`;
+  return `<div class="${cls}">${label}${badges}${items}${linksHtml}${createdBy}</div>`;
 }
 
 export function buildRoadmapHtml(data: ExportData): string {

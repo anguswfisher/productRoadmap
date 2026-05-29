@@ -27,6 +27,11 @@ export type AppKey =
   | 'platform'
   | 'product';
 
+export interface TileLink {
+  label: string;
+  url: string;
+}
+
 export interface Tile {
   id: string;
   stream: StreamKey; // which initiative row
@@ -38,6 +43,9 @@ export interface Tile {
   label?: string;
   items: string[];
   createdBy?: string[];
+  /** New: multiple named links (PRD, Artifact, etc.). */
+  links?: TileLink[];
+  /** Legacy single link; render as fallback if `links` isn't set. */
   link?: string;
 }
 
