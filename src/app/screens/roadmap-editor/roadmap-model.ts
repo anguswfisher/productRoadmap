@@ -175,6 +175,54 @@ export interface CombinedRoadmap {
   title: string;
 }
 
+/** Column-by-column mapping back to a source roadmap. Used to enable editing in
+ *  the combined timeline view. `null` means the column belongs to no roadmap. */
+export type MonthMap = ({ roadmapId: string; localMonth: number } | null)[];
+
+export interface EditableCombinedRoadmap extends CombinedRoadmap {
+  monthMap: MonthMap;
+}
+
+/** Like combineRoadmaps but does NOT trim empty edge months (so column indices
+ *  line up 1:1 with the source roadmaps' quarters) and returns a column map. */
+export function buildEditableTimeline(roadmaps: Roadmap[]): EditableCombinedRoadmap {
+  const sorted = [...roadmaps].sort((a, b) => a.year - b.year || a.quarter - b.quarter);
+  const streams: StreamDef[] = [];
+  const seen = new Set<StreamKey>();
+  const months: MonthDef[] = [];
+  const tiles: Tile[] = [];
+  const monthMap: MonthMap = [];
+  let offset = 0;
+
+  for (const r of sorted) {
+    for (const init of r.initiatives) {
+      if (!seen.has(init.key)) {
+        seen.add(init.key);
+        streams.push(init);
+      }
+    }
+    const qm = quarterMonths(r.quarter, r.year);
+    for (let i = 0; i < qm.length; i++) {
+      months.push(qm[i]);
+      monthMap.push({ roadmapId: r.id, localMonth: i });
+    }
+    for (const t of r.tiles) {
+      tiles.push({ ...t, id: `${r.id}:${t.id}`, month: offset + t.month });
+    }
+    offset += qm.length;
+  }
+
+  let title = 'Full timeline';
+  if (sorted.length === 1) title = quarterLabel(sorted[0].quarter, sorted[0].year);
+  else if (sorted.length > 1) {
+    const f = sorted[0];
+    const l = sorted[sorted.length - 1];
+    title = `${quarterLabel(f.quarter, f.year)} – ${quarterLabel(l.quarter, l.year)}`;
+  }
+
+  return { streams, months, tiles, title, monthMap };
+}
+
 /**
  * Stitches multiple quarter roadmaps into one wide timeline: initiatives merged
  * into shared rows (by key), months concatenated chronologically, tiles remapped

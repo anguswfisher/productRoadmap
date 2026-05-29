@@ -53,6 +53,9 @@ export class RoadmapStorageService {
   private pending: Roadmap | null = null;
   private nextFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private nextPending: NextDoc | null = null;
+  // Per-roadmap debounce so timeline edits across quarters don't clobber.
+  private pendingById = new Map<string, Roadmap>();
+  private timerById = new Map<string, ReturnType<typeof setTimeout>>();
 
   get enabled(): boolean {
     return isSupabaseConfigured;
@@ -136,6 +139,26 @@ export class RoadmapStorageService {
     if (this.pending === null) return;
     const roadmap = this.pending;
     this.pending = null;
+    const { error } = await this.write(roadmap);
+    onState?.(error ? 'error' : 'saved');
+  }
+
+  /** Debounced save keyed by roadmap id — safe to call for multiple roadmaps in quick succession. */
+  saveRoadmap(roadmap: Roadmap, onState?: (s: SaveState) => void): void {
+    if (!isSupabaseConfigured) return;
+    this.pendingById.set(roadmap.id, roadmap);
+    onState?.('saving');
+    const existing = this.timerById.get(roadmap.id);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => void this.flushById(roadmap.id, onState), FLUSH_DELAY_MS);
+    this.timerById.set(roadmap.id, t);
+  }
+
+  private async flushById(id: string, onState?: (s: SaveState) => void): Promise<void> {
+    this.timerById.delete(id);
+    const roadmap = this.pendingById.get(id);
+    if (!roadmap) return;
+    this.pendingById.delete(id);
     const { error } = await this.write(roadmap);
     onState?.(error ? 'error' : 'saved');
   }

@@ -29,6 +29,8 @@ import {
   genId,
   combineRoadmaps,
   rollingWindow,
+  buildEditableTimeline,
+  MonthMap,
 } from './roadmap-model';
 
 export type EditorMode = 'edit' | 'timeline' | 'rolling';
@@ -51,7 +53,14 @@ export class RoadmapEditorComponent {
   // ── Multi-roadmap state ─────────────────────────────────────────
   roadmaps: Roadmap[] = [];
   current: Roadmap | null = null;
-  months: MonthDef[] = [];
+  private currentMonths: MonthDef[] = [];
+
+  // What's currently rendered (varies by mode).
+  display: { streams: StreamDef[]; months: MonthDef[]; tiles: Tile[] } = {
+    streams: [], months: [], tiles: [],
+  };
+  monthMap: MonthMap = [];
+
   loading = true;
   hiddenStreams = new Set<StreamKey>();
 
@@ -121,23 +130,88 @@ export class RoadmapEditorComponent {
     if (this.mode === 'rolling') this.refreshView();
   }
 
+  /** Rebuilds whichever surface the current mode uses (iframe for rolling, native grid otherwise). */
   private refreshView(): void {
-    this.timelineHtml = this.mode === 'edit'
-      ? null
-      : this.sanitizer.bypassSecurityTrustHtml(this.buildHtml(false));
+    if (this.mode === 'rolling') {
+      this.timelineHtml = this.sanitizer.bypassSecurityTrustHtml(this.buildHtml(false));
+    } else {
+      this.timelineHtml = null;
+    }
+    this.refreshDisplay();
   }
 
   // ── Convenience accessors ───────────────────────────────────────
-  get streams(): StreamDef[] {
-    return this.current?.initiatives ?? [];
-  }
-
-  get tiles(): Tile[] {
-    return this.current?.tiles ?? [];
-  }
+  get streams(): StreamDef[] { return this.display.streams; }
+  get months(): MonthDef[] { return this.display.months; }
+  get tiles(): Tile[] { return this.display.tiles; }
 
   get currentLabel(): string {
     return this.current ? quarterLabel(this.current.quarter, this.current.year) : '';
+  }
+
+  /** Rebuilds `display` + `monthMap` from current state. Called after any change. */
+  private refreshDisplay(): void {
+    if (this.mode === 'timeline') {
+      const c = buildEditableTimeline(this.roadmaps);
+      this.display = { streams: c.streams, months: c.months, tiles: c.tiles };
+      this.monthMap = c.monthMap;
+    } else if (this.mode === 'edit' && this.current) {
+      this.display = {
+        streams: this.current.initiatives,
+        months: this.currentMonths,
+        tiles: this.current.tiles,
+      };
+      this.monthMap = this.currentMonths.map(
+        (_, i) => ({ roadmapId: this.current!.id, localMonth: i }),
+      );
+    } else {
+      // rolling mode renders via iframe (timelineHtml) — display is unused.
+      this.display = { streams: [], months: [], tiles: [] };
+      this.monthMap = [];
+    }
+  }
+
+  /** Resolves a displayed tile (possibly with a synthetic id) back to its source. */
+  private resolveSourceTile(displayedId: string): { roadmap: Roadmap; tile: Tile } | null {
+    if (this.mode === 'edit') {
+      if (!this.current) return null;
+      const tile = this.current.tiles.find((t) => t.id === displayedId);
+      return tile ? { roadmap: this.current, tile } : null;
+    }
+    // Timeline-mode synthetic id format: "{roadmapId}:{originalTileId}"
+    const idx = displayedId.indexOf(':');
+    if (idx < 0) return null;
+    const roadmapId = displayedId.slice(0, idx);
+    const tileId = displayedId.slice(idx + 1);
+    const r = this.roadmaps.find((x) => x.id === roadmapId);
+    const tile = r?.tiles.find((t) => t.id === tileId);
+    return r && tile ? { roadmap: r, tile } : null;
+  }
+
+  /** Maps a displayed column (absolute month index) to its source roadmap + local month. */
+  private resolveDestination(month: number): { roadmap: Roadmap; localMonth: number } | null {
+    const entry = this.monthMap[month];
+    if (!entry) return null;
+    const r = this.roadmaps.find((x) => x.id === entry.roadmapId);
+    return r ? { roadmap: r, localMonth: entry.localMonth } : null;
+  }
+
+  /** Copies an initiative into a roadmap if it's missing there (so cross-roadmap drops work). */
+  private ensureInitiative(target: Roadmap, key: StreamKey): void {
+    if (target.initiatives.some((s) => s.key === key)) return;
+    for (const r of this.roadmaps) {
+      if (r === target) continue;
+      const init = r.initiatives.find((s) => s.key === key);
+      if (init) {
+        target.initiatives.push({ ...init });
+        return;
+      }
+    }
+  }
+
+  private persistRoadmap(r: Roadmap): void {
+    this.storage.saveRoadmap(r, (s) => (this.saveState = s));
+    this.refreshDisplay();
   }
 
   get saveLabel(): string {
@@ -156,13 +230,15 @@ export class RoadmapEditorComponent {
     this.roadmaps = await this.storage.list();
     if (this.roadmaps.length) this.selectRoadmap(this.roadmaps[0]);
     this.loading = false;
+    this.refreshDisplay();
   }
 
   selectRoadmap(r: Roadmap): void {
     this.current = r;
-    this.months = quarterMonths(r.quarter, r.year);
+    this.currentMonths = quarterMonths(r.quarter, r.year);
     this.hiddenStreams.clear();
     this.saveState = 'saved';
+    this.refreshDisplay();
   }
 
   selectRoadmapById(id: string): void {
@@ -220,18 +296,30 @@ export class RoadmapEditorComponent {
 
   // ── Initiatives (left-hand rows) ────────────────────────────────
   addInitiative(): void {
-    if (!this.current) return;
     const name = this.newInitiativeName.trim();
     if (!name) return;
-    const color = nextColor(this.current.initiatives);
-    this.current.initiatives.push({ key: genId('init'), name, meta: '', color });
+
+    if (this.mode === 'edit') {
+      if (!this.current) return;
+      const color = nextColor(this.current.initiatives);
+      this.current.initiatives.push({ key: genId('init'), name, meta: '', color });
+      this.persistRoadmap(this.current);
+    } else if (this.mode === 'timeline' && this.roadmaps.length) {
+      // Add the new initiative to every quarter so it appears across the timeline.
+      const color = nextColor(this.display.streams);
+      const key = genId('init');
+      for (const r of this.roadmaps) {
+        r.initiatives.push({ key, name, meta: '', color });
+        this.persistRoadmap(r);
+      }
+    }
     this.newInitiativeName = '';
-    this.persist();
   }
 
   openEditInitiative(stream: StreamKey, event?: Event): void {
     event?.stopPropagation();
-    const init = this.current?.initiatives.find((s) => s.key === stream);
+    // Use the merged display list — works for both edit and timeline mode.
+    const init = this.display.streams.find((s) => s.key === stream);
     if (!init) return;
     this.editingInitiativeKey = init.key;
     this.editName = init.name;
@@ -268,47 +356,71 @@ export class RoadmapEditorComponent {
   }
 
   saveEditInitiative(): void {
-    if (!this.current || !this.editingInitiativeKey) return;
-    const init = this.current.initiatives.find((s) => s.key === this.editingInitiativeKey);
-    if (!init) return;
+    if (!this.editingInitiativeKey) return;
     const newName = this.editName.trim();
     if (!newName) return;
-    const prevColor = init.color;
-    init.name = newName;
-    init.meta = this.editMeta.trim();
-    init.color = this.editColor;
+    const meta = this.editMeta.trim();
+    const newColor = this.editColor;
     const links = this.editLinks
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
       .filter((l) => l.url);
-    init.links = links.length ? links : undefined;
-    init.devopsLink = undefined; // clear legacy field
-    // If color changed, recolor that initiative's tiles too.
-    if (prevColor !== init.color) {
-      for (const t of this.current.tiles) {
-        if (t.stream === init.key && t.color === prevColor) {
-          t.color = init.color;
+
+    const applyTo = (roadmap: Roadmap): boolean => {
+      const init = roadmap.initiatives.find((s) => s.key === this.editingInitiativeKey);
+      if (!init) return false;
+      const prevColor = init.color;
+      init.name = newName;
+      init.meta = meta;
+      init.color = newColor;
+      init.links = links.length ? links.map((l) => ({ ...l })) : undefined;
+      init.devopsLink = undefined;
+      if (prevColor !== newColor) {
+        for (const t of roadmap.tiles) {
+          if (t.stream === init.key && t.color === prevColor) t.color = newColor;
         }
       }
+      return true;
+    };
+
+    // Initiative properties (name/color/meta/links) are global per key — apply
+    // to every roadmap that has this initiative, regardless of mode.
+    for (const r of this.roadmaps) {
+      if (applyTo(r)) this.persistRoadmap(r);
     }
-    this.persist();
     this.closeEditInitiative();
   }
 
   removeInitiative(stream: StreamKey, event: Event): void {
     event.stopPropagation();
-    if (!this.current) return;
-    const init = this.current.initiatives.find((s) => s.key === stream);
+    const init = this.display.streams.find((s) => s.key === stream);
     const name = init?.name ?? 'this initiative';
-    const tileCount = this.current.tiles.filter((t) => t.stream === stream).length;
-    if (
-      !confirm(
+
+    if (this.mode === 'edit') {
+      if (!this.current) return;
+      const tileCount = this.current.tiles.filter((t) => t.stream === stream).length;
+      if (!confirm(
         `Remove "${name}"${tileCount ? ` and its ${tileCount} block(s)` : ''}?`,
-      )
-    )
-      return;
-    this.current.initiatives = this.current.initiatives.filter((s) => s.key !== stream);
-    this.current.tiles = this.current.tiles.filter((t) => t.stream !== stream);
-    this.persist();
+      )) return;
+      this.current.initiatives = this.current.initiatives.filter((s) => s.key !== stream);
+      this.current.tiles = this.current.tiles.filter((t) => t.stream !== stream);
+      this.persistRoadmap(this.current);
+    } else if (this.mode === 'timeline') {
+      const tileCount = this.roadmaps.reduce(
+        (n, r) => n + r.tiles.filter((t) => t.stream === stream).length, 0,
+      );
+      if (!confirm(
+        `Remove "${name}" across all quarters${tileCount ? ` (and ${tileCount} block(s))` : ''}?`,
+      )) return;
+      for (const r of this.roadmaps) {
+        const had = r.initiatives.some((s) => s.key === stream)
+          || r.tiles.some((t) => t.stream === stream);
+        if (!had) continue;
+        r.initiatives = r.initiatives.filter((s) => s.key !== stream);
+        r.tiles = r.tiles.filter((t) => t.stream !== stream);
+        this.persistRoadmap(r);
+      }
+    }
+    return;
   }
 
   // ── Lookups ─────────────────────────────────────────────────────
@@ -355,18 +467,43 @@ export class RoadmapEditorComponent {
   onStreamDrop(event: DragEvent, s: StreamDef): void {
     event.preventDefault();
     this.streamDropOverKey = null;
-    if (!this.current || !this.draggingStreamKey || this.draggingStreamKey === s.key) {
+    if (!this.draggingStreamKey || this.draggingStreamKey === s.key) {
       this.draggingStreamKey = null;
       return;
     }
-    const inits = this.current.initiatives;
-    const from = inits.findIndex((i) => i.key === this.draggingStreamKey);
-    const to = inits.findIndex((i) => i.key === s.key);
+    const draggedKey = this.draggingStreamKey;
     this.draggingStreamKey = null;
-    if (from < 0 || to < 0 || from === to) return;
-    const [moved] = inits.splice(from, 1);
-    inits.splice(to, 0, moved);
-    this.persist();
+
+    if (this.mode === 'edit') {
+      if (!this.current) return;
+      const inits = this.current.initiatives;
+      const from = inits.findIndex((i) => i.key === draggedKey);
+      const to = inits.findIndex((i) => i.key === s.key);
+      if (from < 0 || to < 0 || from === to) return;
+      const [moved] = inits.splice(from, 1);
+      inits.splice(to, 0, moved);
+      this.persistRoadmap(this.current);
+      return;
+    }
+
+    if (this.mode === 'timeline') {
+      // Reorder the merged display list, then propagate that order to every
+      // roadmap (each roadmap sorts its own initiatives by the new global order).
+      const merged = this.display.streams;
+      const from = merged.findIndex((i) => i.key === draggedKey);
+      const to = merged.findIndex((i) => i.key === s.key);
+      if (from < 0 || to < 0 || from === to) return;
+      const [moved] = merged.splice(from, 1);
+      merged.splice(to, 0, moved);
+      const orderIndex = new Map<StreamKey, number>();
+      merged.forEach((init, i) => orderIndex.set(init.key, i));
+      for (const r of this.roadmaps) {
+        r.initiatives.sort(
+          (a, b) => (orderIndex.get(a.key) ?? 1e9) - (orderIndex.get(b.key) ?? 1e9),
+        );
+        this.persistRoadmap(r);
+      }
+    }
   }
   onStreamDragEnd(): void {
     this.draggingStreamKey = null;
@@ -402,37 +539,59 @@ export class RoadmapEditorComponent {
   onDrop(event: DragEvent, stream: StreamKey, lane: Lane, month: number): void {
     event.preventDefault();
     this.dragOverKey = null;
-    if (!this.draggingId || !this.current) return;
-    const tile = this.current.tiles.find((t) => t.id === this.draggingId);
-    if (!tile) return;
-    tile.stream = stream;
-    tile.lane = lane;
-    tile.month = month;
-    const init = this.streams.find((s) => s.key === stream);
-    if (init) tile.color = init.color;
+    const draggedId = this.draggingId;
     this.draggingId = null;
-    this.persist();
+    if (!draggedId) return;
+
+    const src = this.resolveSourceTile(draggedId);
+    const dest = this.resolveDestination(month);
+    if (!src || !dest) return;
+
+    this.ensureInitiative(dest.roadmap, stream);
+    const destInit = dest.roadmap.initiatives.find((s) => s.key === stream);
+
+    if (src.roadmap === dest.roadmap) {
+      src.tile.stream = stream;
+      src.tile.lane = lane;
+      src.tile.month = dest.localMonth;
+      if (destInit) src.tile.color = destInit.color;
+      this.persistRoadmap(src.roadmap);
+    } else {
+      // Cross-roadmap move: remove from source, push fresh tile into destination.
+      src.roadmap.tiles = src.roadmap.tiles.filter((t) => t.id !== src.tile.id);
+      dest.roadmap.tiles.push({
+        ...src.tile,
+        id: genId('t'),
+        stream, lane,
+        month: dest.localMonth,
+        color: destInit?.color ?? src.tile.color,
+      });
+      this.persistRoadmap(src.roadmap);
+      this.persistRoadmap(dest.roadmap);
+    }
   }
 
   // ── Delete & inline edit ────────────────────────────────────────
   deleteTile(tile: Tile): void {
-    if (!this.current) return;
-    this.current.tiles = this.current.tiles.filter((t) => t.id !== tile.id);
-    this.persist();
+    const src = this.resolveSourceTile(tile.id);
+    if (!src) return;
+    src.roadmap.tiles = src.roadmap.tiles.filter((t) => t.id !== src.tile.id);
+    this.persistRoadmap(src.roadmap);
   }
 
   onItemEdit(tile: Tile, index: number, event: Event): void {
-    if (!this.current) return;
+    const src = this.resolveSourceTile(tile.id);
+    if (!src) return;
     const text = (event.target as HTMLElement).textContent?.trim() ?? '';
     if (text) {
-      tile.items[index] = text;
+      src.tile.items[index] = text;
     } else {
-      tile.items.splice(index, 1);
-      if (tile.items.length === 0) {
-        this.current.tiles = this.current.tiles.filter((t) => t.id !== tile.id);
+      src.tile.items.splice(index, 1);
+      if (src.tile.items.length === 0) {
+        src.roadmap.tiles = src.roadmap.tiles.filter((t) => t.id !== src.tile.id);
       }
     }
-    this.persist();
+    this.persistRoadmap(src.roadmap);
   }
 
   // ── Add/edit block modal ────────────────────────────────────────
@@ -504,7 +663,7 @@ export class RoadmapEditorComponent {
   }
 
   submitAdd(): void {
-    if (!this.modalCell || !this.current) return;
+    if (!this.modalCell) return;
     const items = this.modalText.split('\n').map((s) => s.trim()).filter(Boolean);
     if (items.length === 0) return;
 
@@ -513,22 +672,29 @@ export class RoadmapEditorComponent {
       .filter((l) => l.url);
 
     if (this.editingTileId) {
-      const tile = this.current.tiles.find((t) => t.id === this.editingTileId);
-      if (tile) {
-        tile.items = items;
-        tile.milestone = this.modalMilestone;
-        tile.badges = Array.from(this.modalBadges);
-        tile.createdBy = Array.from(this.modalCreatedBy);
-        tile.links = links.length ? links : undefined;
-        tile.link = undefined; // clear legacy field
+      const src = this.resolveSourceTile(this.editingTileId);
+      if (src) {
+        src.tile.items = items;
+        src.tile.milestone = this.modalMilestone;
+        src.tile.badges = Array.from(this.modalBadges);
+        src.tile.createdBy = Array.from(this.modalCreatedBy);
+        src.tile.links = links.length ? links : undefined;
+        src.tile.link = undefined; // clear legacy field
+        this.persistRoadmap(src.roadmap);
       }
     } else {
-      const init = this.streams.find((s) => s.key === this.modalCell!.stream);
-      this.current.tiles.push({
+      const dest = this.resolveDestination(this.modalCell.month);
+      if (!dest) {
+        this.closeAdd();
+        return;
+      }
+      this.ensureInitiative(dest.roadmap, this.modalCell.stream);
+      const init = dest.roadmap.initiatives.find((s) => s.key === this.modalCell!.stream);
+      dest.roadmap.tiles.push({
         id: genId('t'),
         stream: this.modalCell.stream,
         lane: this.modalCell.lane,
-        month: this.modalCell.month,
+        month: dest.localMonth,
         color: init?.color ?? 'platform',
         milestone: this.modalMilestone,
         badges: Array.from(this.modalBadges),
@@ -536,8 +702,8 @@ export class RoadmapEditorComponent {
         createdBy: Array.from(this.modalCreatedBy),
         links: links.length ? links : undefined,
       });
+      this.persistRoadmap(dest.roadmap);
     }
-    this.persist();
     this.closeAdd();
   }
 
@@ -621,6 +787,6 @@ export class RoadmapEditorComponent {
   // ── Persistence ─────────────────────────────────────────────────
   private persist(): void {
     if (!this.current) return;
-    this.storage.save(this.current, (s) => (this.saveState = s));
+    this.persistRoadmap(this.current);
   }
 }

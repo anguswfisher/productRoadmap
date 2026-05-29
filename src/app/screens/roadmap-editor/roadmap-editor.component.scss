@@ -258,6 +258,8 @@
 /* Stream-label card: draggable for row reorder */
 .stream-label{position:relative;cursor:grab;user-select:none;transition:opacity .15s,box-shadow .15s;}
 .stream-label:active{cursor:grabbing;}
+.stream-label.row-locked{cursor:default;}
+.stream-label.row-locked:active{cursor:default;}
 .stream-label.row-dragging{opacity:.45;}
 .stream-label.row-drop-over{box-shadow:inset 0 4px 0 0 var(--accent);}
 .stream-label.row-drop-over::after{content:'⤓ drop here';position:absolute;top:6px;left:50%;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);}

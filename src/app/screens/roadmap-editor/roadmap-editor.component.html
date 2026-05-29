@@ -76,15 +76,15 @@
     <button class="btn-mini" type="button" (click)="openNewRoadmap()">+ New roadmap</button>
   </div>
 
-  <!-- Full timeline (read-only) -->
+  <!-- Rolling view (read-only iframe) -->
   <iframe
     class="timeline-frame"
-    *ngIf="timelineMode && timelineHtml"
+    *ngIf="mode === 'rolling' && timelineHtml"
     [srcdoc]="timelineHtml"
-    title="Full roadmap timeline"
+    title="Rolling roadmap window"
   ></iframe>
 
-  <ng-container *ngIf="current && mode === 'edit'">
+  <ng-container *ngIf="(mode === 'edit' && current) || (mode === 'timeline' && roadmaps.length)">
     <div class="legend">
       <div
         class="legend-pill"
@@ -109,7 +109,10 @@
       <div class="legend-key"><span class="swatch release"></span>Release</div>
     </div>
 
-    <div class="roadmap">
+    <div
+      class="roadmap"
+      [style.grid-template-columns]="'200px 120px repeat(' + months.length + ', minmax(0, 1fr))'"
+    >
       <div class="corner-cell"></div>
       <div
         class="month-header"
