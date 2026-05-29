@@ -122,7 +122,19 @@
 
       <ng-container *ngFor="let s of streams; trackBy: trackStream">
         <div class="stream-row" *ngIf="isStreamActive(s.key)">
-          <div class="stream-label" [ngClass]="s.color">
+          <div
+            class="stream-label"
+            [ngClass]="s.color"
+            [class.row-dragging]="draggingStreamKey === s.key"
+            [class.row-drop-over]="streamDropOverKey === s.key"
+            draggable="true"
+            (dragstart)="onStreamDragStart(s, $event)"
+            (dragend)="onStreamDragEnd()"
+            (dragover)="onStreamDragOver($event, s)"
+            (dragleave)="onStreamDragLeave(s)"
+            (drop)="onStreamDrop($event, s)"
+            title="Drag to reorder this initiative"
+          >
             <div class="stream-actions">
               <button
                 class="stream-edit"

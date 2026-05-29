@@ -71,9 +71,13 @@ export class RoadmapEditorComponent {
   editColor: ColorKey = 'platform';
   editLinks: TileLink[] = [];
 
-  // Drag state
+  // Drag state (tiles)
   private draggingId: string | null = null;
   dragOverKey: string | null = null;
+
+  // Drag state (initiative rows)
+  draggingStreamKey: StreamKey | null = null;
+  streamDropOverKey: StreamKey | null = null;
 
   // Add/edit block modal
   modalOpen = false;
@@ -331,7 +335,45 @@ export class RoadmapEditorComponent {
     return !this.hiddenStreams.has(stream);
   }
 
-  // ── Drag & drop ─────────────────────────────────────────────────
+  // ── Drag & drop: reorder initiative rows ────────────────────────
+  onStreamDragStart(s: StreamDef, event: DragEvent): void {
+    this.draggingStreamKey = s.key;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', `row:${s.key}`);
+    }
+  }
+  onStreamDragOver(event: DragEvent, s: StreamDef): void {
+    if (!this.draggingStreamKey || this.draggingStreamKey === s.key) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    this.streamDropOverKey = s.key;
+  }
+  onStreamDragLeave(s: StreamDef): void {
+    if (this.streamDropOverKey === s.key) this.streamDropOverKey = null;
+  }
+  onStreamDrop(event: DragEvent, s: StreamDef): void {
+    event.preventDefault();
+    this.streamDropOverKey = null;
+    if (!this.current || !this.draggingStreamKey || this.draggingStreamKey === s.key) {
+      this.draggingStreamKey = null;
+      return;
+    }
+    const inits = this.current.initiatives;
+    const from = inits.findIndex((i) => i.key === this.draggingStreamKey);
+    const to = inits.findIndex((i) => i.key === s.key);
+    this.draggingStreamKey = null;
+    if (from < 0 || to < 0 || from === to) return;
+    const [moved] = inits.splice(from, 1);
+    inits.splice(to, 0, moved);
+    this.persist();
+  }
+  onStreamDragEnd(): void {
+    this.draggingStreamKey = null;
+    this.streamDropOverKey = null;
+  }
+
+  // ── Drag & drop: tiles ──────────────────────────────────────────
   cellKey(stream: StreamKey, lane: Lane, month: number): string {
     return `${stream}|${lane}|${month}`;
   }
