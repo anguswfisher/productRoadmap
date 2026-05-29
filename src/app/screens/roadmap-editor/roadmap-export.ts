@@ -1,7 +1,14 @@
 // Generates a self-contained, read-only HTML snapshot of the roadmap —
 // the same "Export Embeddable HTML" output as the original tool.
 
-interface ExportStream { key: string; name: string; meta: string; color: string; devopsLink?: string; }
+interface ExportStream {
+  key: string;
+  name: string;
+  meta: string;
+  color: string;
+  links?: { label: string; url: string }[];
+  devopsLink?: string;
+}
 interface ExportMonth { month: string; quarter: string; current: boolean; }
 interface ExportLane { key: string; label: string; }
 interface ExportApp { key: string; label: string; badgeClass: string; }
@@ -105,7 +112,8 @@ const ROADMAP_CSS = `
   .stream-label.ubp{border-left-color:var(--ubp);}
   .stream-label .stream-name{font-family:'Fraunces',serif;font-weight:500;font-size:19px;letter-spacing:-0.015em;line-height:1.15;}
   .stream-label .stream-meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);margin-top:6px;letter-spacing:.08em;text-transform:uppercase;}
-  .stream-label .stream-link{display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.7;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;align-self:flex-start;}
+  .stream-label .stream-links{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;}
+  .stream-label .stream-link{display:inline-flex;align-items:center;gap:4px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.7;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;}
   .stream-label .stream-link:hover{opacity:1;}
   .lane-label{background:var(--bg-soft);padding:14px;display:flex;align-items:center;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);font-weight:600;gap:8px;}
   .lane-label .lane-icon{display:inline-block;width:14px;height:10px;border-radius:3px;flex-shrink:0;}
@@ -233,10 +241,15 @@ export function buildRoadmapHtml(data: ExportData): string {
           return laneLabel + cells;
         })
         .join('');
-      const link = s.devopsLink
-        ? `<a class="stream-link" href="${esc(s.devopsLink)}" target="_blank" rel="noopener">↗ DevOps</a>`
+      const streamLinkList = (s.links && s.links.length)
+        ? s.links
+        : (s.devopsLink ? [{ label: 'DevOps', url: s.devopsLink }] : []);
+      const streamLinks = streamLinkList.length
+        ? `<div class="stream-links">${streamLinkList
+            .map((l) => `<a class="stream-link" href="${esc(l.url)}" target="_blank" rel="noopener">↗ ${esc(l.label || 'Link')}</a>`)
+            .join('')}</div>`
         : '';
-      return `<div class="stream-row"><div class="stream-label ${s.color}"><div class="stream-name">${esc(s.name)}</div><div class="stream-meta">${esc(s.meta)}</div>${link}</div>${lanesHtml}</div>`;
+      return `<div class="stream-row"><div class="stream-label ${s.color}"><div class="stream-name">${esc(s.name)}</div><div class="stream-meta">${esc(s.meta)}</div>${streamLinks}</div>${lanesHtml}</div>`;
     })
     .join('');
 

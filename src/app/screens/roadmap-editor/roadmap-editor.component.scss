@@ -263,8 +263,9 @@
 .stream-edit:hover{background:rgba(46,134,193,.2);color:var(--catina);}
 .stream-remove:hover{background:rgba(217,36,71,.2);color:var(--accent);}
 
-/* DevOps link on the stream label */
-.stream-label .stream-link{display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.7;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;align-self:flex-start;}
+/* Links on the stream label */
+.stream-label .stream-links{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;}
+.stream-label .stream-link{display:inline-flex;align-items:center;gap:4px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:inherit;opacity:.7;text-decoration:none;border:1px solid currentColor;padding:2px 6px;border-radius:4px;}
 .stream-label .stream-link:hover{opacity:1;}
 
 /* Color picker in edit-initiative modal */

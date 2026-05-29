@@ -55,6 +55,9 @@ export interface StreamDef {
   name: string;
   meta: string; // short tag / subtitle
   color: ColorKey;
+  /** New: multiple named links (DevOps, PRD, Figma, etc.). */
+  links?: TileLink[];
+  /** Legacy single DevOps link — kept for backward compat. */
   devopsLink?: string;
 }
 

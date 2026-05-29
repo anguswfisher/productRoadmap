@@ -69,7 +69,7 @@ export class RoadmapEditorComponent {
   editName = '';
   editMeta = '';
   editColor: ColorKey = 'platform';
-  editLink = '';
+  editLinks: TileLink[] = [];
 
   // Drag state
   private draggingId: string | null = null;
@@ -233,8 +233,25 @@ export class RoadmapEditorComponent {
     this.editName = init.name;
     this.editMeta = init.meta ?? '';
     this.editColor = init.color;
-    this.editLink = init.devopsLink ?? '';
+    // Migrate legacy single devopsLink into the new list form.
+    this.editLinks = init.links?.map((l) => ({ label: l.label, url: l.url }))
+      ?? (init.devopsLink ? [{ label: 'DevOps', url: init.devopsLink }] : []);
     this.editInitiativeOpen = true;
+  }
+
+  addEditLink(): void {
+    this.editLinks.push({ label: '', url: '' });
+  }
+  removeEditLink(index: number): void {
+    this.editLinks.splice(index, 1);
+  }
+  trackEditLink = (i: number) => i;
+
+  /** Returns the links to render on an initiative (handles legacy devopsLink). */
+  streamLinks(s: StreamDef): TileLink[] {
+    if (s.links && s.links.length) return s.links;
+    if (s.devopsLink) return [{ label: 'DevOps', url: s.devopsLink }];
+    return [];
   }
 
   closeEditInitiative(): void {
@@ -256,7 +273,11 @@ export class RoadmapEditorComponent {
     init.name = newName;
     init.meta = this.editMeta.trim();
     init.color = this.editColor;
-    init.devopsLink = this.editLink.trim() || undefined;
+    const links = this.editLinks
+      .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
+      .filter((l) => l.url);
+    init.links = links.length ? links : undefined;
+    init.devopsLink = undefined; // clear legacy field
     // If color changed, recolor that initiative's tiles too.
     if (prevColor !== init.color) {
       for (const t of this.current.tiles) {
